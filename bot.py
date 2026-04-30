@@ -589,7 +589,6 @@ async def btn_profile(message: Message, db: DB) -> None:
         return
     await cmd_profile(message, db)
 
-
 async def main() -> None:
     # Load .env if present (local dev convenience)
     load_dotenv()
@@ -598,7 +597,14 @@ async def main() -> None:
     if not token:
         raise RuntimeError("Set BOT_TOKEN env var")
 
-    db = DB(os.getenv("DB_PATH", "krugbot.sqlite3"))
+    # Используем /data на Railway для постоянного хранения
+    if os.path.exists('/data'):
+        db_path = '/data/krugbot.sqlite3'
+        os.makedirs('/data', exist_ok=True)
+    else:
+        db_path = os.getenv("DB_PATH", "krugbot.sqlite3")
+    db = DB(db_path)
+    
     try:
         log.info("Bot starting…")
         async with Bot(token=token) as bot:
