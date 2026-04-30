@@ -32,6 +32,7 @@ class DB:
               user_id INTEGER PRIMARY KEY,
               username TEXT,
               has_video INTEGER NOT NULL DEFAULT 0,
+              active_chat_user_id INTEGER,
               age INTEGER,
               gender TEXT,
               looking_for TEXT,
@@ -113,6 +114,8 @@ class DB:
             add("age INTEGER")
         if "username" not in cols:
             add("username TEXT")
+        if "active_chat_user_id" not in cols:
+            add("active_chat_user_id INTEGER")
         if "gender" not in cols:
             add("gender TEXT")
         if "looking_for" not in cols:
@@ -146,6 +149,36 @@ class DB:
         if not row:
             return None
         return row["username"]
+
+    def get_active_chat_user(self, user_id: int) -> Optional[int]:
+        self.ensure_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute("SELECT active_chat_user_id FROM users WHERE user_id=?;", (user_id,))
+        row = cur.fetchone()
+        if not row or row["active_chat_user_id"] is None:
+            return None
+        return int(row["active_chat_user_id"])
+
+    def start_chat(self, user_id: int, partner_user_id: int) -> None:
+        self.ensure_user(user_id)
+        self.ensure_user(partner_user_id)
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET active_chat_user_id=? WHERE user_id=?;", (partner_user_id, user_id))
+        cur.execute("UPDATE users SET active_chat_user_id=? WHERE user_id=?;", (user_id, partner_user_id))
+        self.conn.commit()
+
+    def end_chat(self, user_id: int) -> Optional[int]:
+        self.ensure_user(user_id)
+        partner_user_id = self.get_active_chat_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET active_chat_user_id=NULL WHERE user_id=?;", (user_id,))
+        if partner_user_id is not None:
+            cur.execute(
+                "UPDATE users SET active_chat_user_id=NULL WHERE user_id=? AND active_chat_user_id=?;",
+                (partner_user_id, user_id),
+            )
+        self.conn.commit()
+        return partner_user_id
 
     def user_has_video(self, user_id: int) -> bool:
         cur = self.conn.cursor()

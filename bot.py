@@ -78,9 +78,12 @@ def kb_watch() -> InlineKeyboardMarkup:
     )
 
 
-def kb_video(video_id: int) -> InlineKeyboardMarkup:
+def kb_video(video_id: int, owner_user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Начать чат", callback_data=f"chat_start:{owner_user_id}"),
+            ],
             [
                 InlineKeyboardButton(text="👍", callback_data=f"rate:{video_id}:1"),
                 InlineKeyboardButton(text="👎", callback_data=f"rate:{video_id}:-1"),
@@ -337,7 +340,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             await bot.send_video_note(
                 chat_id,
                 video.file_id,
-                reply_markup=kb_video(video.id),
+                reply_markup=kb_video(video.id, video.owner_user_id),
             )
             return
         except TelegramBadRequest as e:
@@ -420,7 +423,7 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await bot.send_video_note(
             cb.message.chat.id,
             video.file_id,
-            reply_markup=kb_video(video.id),
+            reply_markup=kb_video(video.id, video.owner_user_id),
         )
     except TelegramBadRequest as e:
         msg = str(e)
@@ -451,6 +454,50 @@ async def cb_rate(cb: CallbackQuery, db: DB) -> None:
         return
 
     await cb.answer("Оценка сохранена", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("chat_start:"))
+async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    touch_user(db, cb.from_user)
+    if await guard_banned_callback(cb, db):
+        return
+
+    try:
+        _, raw_owner_id = cb.data.split(":", 1)
+        owner_user_id = int(raw_owner_id)
+    except Exception:
+        await cb.answer("Не удалось начать чат", show_alert=True)
+        return
+
+    current_partner = db.get_active_chat_user(cb.from_user.id)
+    if current_partner is not None and current_partner != owner_user_id:
+        await cb.answer()
+        await cb.message.answer(
+            "Сейчас ты уже находишься в чате. Сначала заверши его командой /stopchat, чтобы начать новый."
+        )
+        return
+
+    if current_partner == owner_user_id:
+        await cb.answer()
+        await cb.message.answer("Ты уже в чате с этим пользователем. Для завершения используй /stopchat.")
+        return
+
+    owner_partner = db.get_active_chat_user(owner_user_id)
+    if owner_partner is not None and owner_partner != cb.from_user.id:
+        await cb.answer()
+        await cb.message.answer("Этот пользователь сейчас уже находится в другом чате.")
+        return
+
+    db.start_chat(cb.from_user.id, owner_user_id)
+    await cb.answer()
+    await cb.message.answer("Теперь вы в чате с этим пользователем. Чтобы закончить чат, используй /stopchat.")
+    try:
+        await bot.send_message(
+            owner_user_id,
+            "С тобой начали чат. Теперь вы в чате. Чтобы закончить чат, используй /stopchat.",
+        )
+    except TelegramBadRequest:
+        pass
 
 
 @router.callback_query(F.data == "rewrite")
@@ -530,6 +577,24 @@ async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
     if await guard_banned_message(message, db):
         return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
+
+
+@router.message(F.text == "/stopchat")
+async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
+    touch_user(db, message.from_user)
+    if await guard_banned_message(message, db):
+        return
+
+    partner_user_id = db.end_chat(message.from_user.id)
+    if partner_user_id is None:
+        await message.answer("Сейчас у тебя нет активного чата.")
+        return
+
+    await message.answer("Чат завершён.")
+    try:
+        await bot.send_message(partner_user_id, "Собеседник завершил чат.")
+    except TelegramBadRequest:
+        pass
 
 
 @router.message(F.text == "/my_video")
@@ -620,6 +685,32 @@ async def btn_profile(message: Message, db: DB) -> None:
     if await guard_banned_message(message, db):
         return
     await cmd_profile(message, db)
+
+
+@router.message()
+async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
+    if not message.from_user:
+        return
+
+    touch_user(db, message.from_user)
+    if await guard_banned_message(message, db):
+        return
+
+    if message.text and message.text.startswith("/"):
+        return
+
+    partner_user_id = db.get_active_chat_user(message.from_user.id)
+    if partner_user_id is None:
+        return
+
+    try:
+        await bot.copy_message(
+            partner_user_id,
+            message.chat.id,
+            message.message_id,
+        )
+    except TelegramBadRequest:
+        await message.answer("Не удалось доставить сообщение собеседнику.")
 
 async def main() -> None:
     # Load .env if present (local dev convenience)
