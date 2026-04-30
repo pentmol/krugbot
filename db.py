@@ -30,6 +30,7 @@ class DB:
             """
             CREATE TABLE IF NOT EXISTS users (
               user_id INTEGER PRIMARY KEY,
+              username TEXT,
               has_video INTEGER NOT NULL DEFAULT 0,
               age INTEGER,
               gender TEXT,
@@ -110,6 +111,8 @@ class DB:
 
         if "age" not in cols:
             add("age INTEGER")
+        if "username" not in cols:
+            add("username TEXT")
         if "gender" not in cols:
             add("gender TEXT")
         if "looking_for" not in cols:
@@ -125,10 +128,24 @@ class DB:
 
         self.conn.commit()
 
-    def ensure_user(self, user_id: int) -> None:
+    def ensure_user(self, user_id: int, username: Optional[str] = None) -> None:
         cur = self.conn.cursor()
-        cur.execute("INSERT OR IGNORE INTO users(user_id) VALUES (?);", (user_id,))
+        cur.execute(
+            "INSERT OR IGNORE INTO users(user_id, username) VALUES (?, ?);",
+            (user_id, username),
+        )
+        if username is not None:
+            cur.execute("UPDATE users SET username=? WHERE user_id=?;", (username, user_id))
         self.conn.commit()
+
+    def get_username(self, user_id: int) -> Optional[str]:
+        self.ensure_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute("SELECT username FROM users WHERE user_id=?;", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return row["username"]
 
     def user_has_video(self, user_id: int) -> bool:
         cur = self.conn.cursor()

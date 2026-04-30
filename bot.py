@@ -107,6 +107,16 @@ def kb_admin_ban(owner_user_id: int) -> InlineKeyboardMarkup:
         ]
     )
 
+def format_user_ref(user_id: int, username: str | None) -> str:
+    if username:
+        return f"{user_id} (@{username})"
+    return str(user_id)
+
+
+def touch_user(db: DB, tg_user) -> None:
+    db.ensure_user(tg_user.id, tg_user.username)
+
+
 async def guard_banned_message(message: Message, db: DB) -> bool:
     user_id = message.from_user.id
     if not db.is_banned(user_id):
@@ -128,7 +138,7 @@ async def guard_banned_callback(cb: CallbackQuery, db: DB) -> bool:
 @router.message(CommandStart())
 async def start(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
-    db.ensure_user(user_id)
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
 
@@ -159,6 +169,7 @@ async def start(message: Message, db: DB, state: FSMContext) -> None:
 
 @router.message(ProfileStates.waiting_age)
 async def prof_age(message: Message, db: DB, state: FSMContext) -> None:
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     if not message.text:
@@ -180,6 +191,7 @@ async def prof_age(message: Message, db: DB, state: FSMContext) -> None:
 
 @router.callback_query(F.data.in_(["gender:M", "gender:F"]))
 async def cb_prof_gender(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     if await state.get_state() != ProfileStates.waiting_gender.state:
@@ -195,6 +207,7 @@ async def cb_prof_gender(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
 
 @router.callback_query(F.data.in_(["looking:M", "looking:F"]))
 async def cb_prof_looking_for(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     if await state.get_state() != ProfileStates.waiting_looking_for.state:
@@ -214,6 +227,7 @@ async def cb_prof_looking_for(cb: CallbackQuery, state: FSMContext, db: DB) -> N
 @router.message(ProfileStates.waiting_about)
 async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     about = (message.text or "").strip()
@@ -250,6 +264,7 @@ async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
 @router.message(F.video_note)
 async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     if not db.profile_complete(user_id):
@@ -335,6 +350,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
 
 @router.callback_query(F.data == "watch")
 async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -343,6 +359,7 @@ async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data == "next")
 async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -351,6 +368,7 @@ async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("complaint:"))
 async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer("Спасибо за жалобу!", show_alert=False)
@@ -370,6 +388,8 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         if row:
             owner_user_id = int(row["owner_user_id"])
             file_id = str(row["file_id"])
+            owner_username = db.get_username(owner_user_id)
+            reporter_username = db.get_username(cb.from_user.id)
             try:
                 await bot.send_video_note(
                     ADMIN_CHAT_ID,
@@ -383,7 +403,10 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
                 )
             await bot.send_message(
                 ADMIN_CHAT_ID,
-                f"Жалоба.\nКружок ID: {video_id}\nАвтор: {owner_user_id}\nЖалоба от: {cb.from_user.id}",
+                "Жалоба.\n"
+                f"Кружок ID: {video_id}\n"
+                f"Автор: {format_user_ref(owner_user_id, owner_username)}\n"
+                f"Жалоба от: {format_user_ref(cb.from_user.id, reporter_username)}",
             )
     except Exception:
         log.exception("Failed to notify admin about complaint")
@@ -409,6 +432,7 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("rate:"))
 async def cb_rate(cb: CallbackQuery, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     # rating does not auto-advance; user can press "Следующее" manually
@@ -431,6 +455,7 @@ async def cb_rate(cb: CallbackQuery, db: DB) -> None:
 
 @router.callback_query(F.data == "rewrite")
 async def cb_rewrite(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -440,6 +465,7 @@ async def cb_rewrite(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("admin_ban:"))
 async def cb_admin_ban(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    touch_user(db, cb.from_user)
     if cb.from_user.id != ADMIN_CHAT_ID:
         await cb.answer("Недостаточно прав", show_alert=True)
         return
@@ -500,6 +526,7 @@ async def set_commands(bot: Bot) -> None:
 
 @router.message(F.text == "/search")
 async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
@@ -508,6 +535,7 @@ async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
 @router.message(F.text == "/my_video")
 async def cmd_my_video(message: Message, bot: Bot, db: DB) -> None:
     user_id = message.from_user.id
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     video = db.get_user_video(user_id)
@@ -538,6 +566,7 @@ async def cmd_my_video(message: Message, bot: Bot, db: DB) -> None:
 @router.message(F.text == "/profile")
 async def cmd_profile(message: Message, db: DB) -> None:
     user_id = message.from_user.id
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     profile = db.get_profile(user_id)
@@ -558,7 +587,7 @@ async def cmd_profile(message: Message, db: DB) -> None:
 
 @router.callback_query(F.data == "edit_profile")
 async def cb_edit_profile(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
-    db.ensure_user(cb.from_user.id)
+    touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -571,6 +600,7 @@ async def cb_edit_profile(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
 
 @router.message(F.text == "🔍 Искать")
 async def btn_search(message: Message, bot: Bot, db: DB) -> None:
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
@@ -578,6 +608,7 @@ async def btn_search(message: Message, bot: Bot, db: DB) -> None:
 
 @router.message(F.text == "⭕️ Мой кружок")
 async def btn_my_video(message: Message, bot: Bot, db: DB) -> None:
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await cmd_my_video(message, bot, db)
@@ -585,6 +616,7 @@ async def btn_my_video(message: Message, bot: Bot, db: DB) -> None:
 
 @router.message(F.text == "👤 Мой профиль")
 async def btn_profile(message: Message, db: DB) -> None:
+    touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await cmd_profile(message, db)
