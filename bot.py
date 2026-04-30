@@ -96,6 +96,17 @@ def kb_video(video_id: int, owner_user_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def format_profile_card(profile: dict | None) -> str:
+    if not profile:
+        return "Информация о пользователе недоступна."
+    return (
+        f"Возраст: {profile.get('age')}\n"
+        f"Пол: {profile.get('gender')}\n"
+        f"Ищет: {profile.get('looking_for')}\n"
+        f"О себе: {profile.get('about')}"
+    )
+
+
 def kb_my_video() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -270,6 +281,17 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
+    active_chat_user_id = db.get_active_chat_user(user_id)
+    if active_chat_user_id is not None:
+        try:
+            await message.bot.copy_message(
+                active_chat_user_id,
+                message.chat.id,
+                message.message_id,
+            )
+        except TelegramBadRequest:
+            await message.answer("Не удалось доставить кружок собеседнику.")
+        return
     if not db.profile_complete(user_id):
         await message.answer("Сначала заполни профиль через /start.")
         return
@@ -312,6 +334,12 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
     if db.is_banned(viewer_user_id):
         # Don't spam banned users; they got a one-time notice on message handlers.
         return
+    if db.get_active_chat_user(viewer_user_id) is not None:
+        await bot.send_message(
+            chat_id,
+            "Сейчас ты находишься в чате. Заверши его командой /stopchat, чтобы снова искать кружки.",
+        )
+        return
     if not db.profile_complete(viewer_user_id):
         await bot.send_message(chat_id, "Сначала заполни профиль через /start.")
         return
@@ -340,6 +368,11 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             await bot.send_video_note(
                 chat_id,
                 video.file_id,
+            )
+            profile = db.get_profile(video.owner_user_id)
+            await bot.send_message(
+                chat_id,
+                format_profile_card(profile),
                 reply_markup=kb_video(video.id, video.owner_user_id),
             )
             return
@@ -423,6 +456,11 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await bot.send_video_note(
             cb.message.chat.id,
             video.file_id,
+        )
+        profile = db.get_profile(video.owner_user_id)
+        await bot.send_message(
+            cb.message.chat.id,
+            format_profile_card(profile),
             reply_markup=kb_video(video.id, video.owner_user_id),
         )
     except TelegramBadRequest as e:
