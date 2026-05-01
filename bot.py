@@ -78,6 +78,15 @@ def kb_watch() -> InlineKeyboardMarkup:
     )
 
 
+def kb_ready(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Смотреть", callback_data="watch")],
+            [InlineKeyboardButton(text="Реферальная система", callback_data=f"referral:{user_id}")],
+        ]
+    )
+
+
 def kb_video(video_id: int, owner_user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -309,10 +318,11 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
         db.set_user_video(user_id, message.video_note.file_id)
         await state.clear()
         await message.answer(
-            "Готово! Твой кружок обновлен. Теперь другие будут видеть новый кружок.",
-            reply_markup=main_kb(),
+            "Готово, твой кружок обновлен. Теперь другие пользователи видят твой кружок.\n"
+            "Нажми «Искать» или кнопку «Смотреть».\n"
+            "Так же ты можешь повысить просмотры своей анкеты, подробнее по кнопке: Реферальная система.",
+            reply_markup=kb_ready(user_id),
         )
-        await message.answer("Нажми «Искать» или кнопку «Смотреть».", reply_markup=kb_watch())
         return
 
     if db.user_has_video(user_id):
@@ -324,10 +334,11 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
 
     db.set_user_video(user_id, message.video_note.file_id)
     await message.answer(
-        "Отлично! Теперь ты можешь смотреть кружки других пользователей.",
-        reply_markup=main_kb(),
+        "Готово, твой кружок установлен. Теперь другие пользователи видят твой кружок.\n"
+        "Нажми «Искать» или кнопку «Смотреть».\n"
+        "Так же ты можешь повысить просмотры своей анкеты, подробнее по кнопке: Реферальная система.",
+        reply_markup=kb_ready(user_id),
     )
-    await message.answer("Нажми «Искать» или кнопку «Смотреть».", reply_markup=kb_watch())
 
 
 async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -> None:
@@ -391,6 +402,19 @@ async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         return
     await cb.answer()
     await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
+
+
+@router.callback_query(F.data.startswith("referral:"))
+async def cb_referral(cb: CallbackQuery, db: DB) -> None:
+    touch_user(db, cb.from_user)
+    if await guard_banned_callback(cb, db):
+        return
+    await cb.answer()
+    user_id = cb.from_user.id
+    await cb.message.answer(
+        "Делись этой ссылкой и получи +20 показов твоего кружка за каждый кружок твоих друзей.\n"
+        f"Твоя ссылка: https://t.me/Anonymcircle_bot?start=ref_{user_id}"
+    )
 
 
 @router.callback_query(F.data == "next")
