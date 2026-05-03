@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import re
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
@@ -29,9 +28,6 @@ log = logging.getLogger("krugbot")
 router = Router()
 
 ADMIN_CHAT_ID = 1962773771
-PARTNER_GROUP_ID = -1003988999463
-PARTNER_BOT_URL = "https://t.me/anonymchat_rubot"
-PARTNER_USAGE_PATTERN = re.compile(r"(\d{5,20})")
 
 
 class RewriteStates(StatesGroup):
@@ -78,15 +74,6 @@ def kb_watch() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Смотреть", callback_data="watch")],
-        ]
-    )
-
-
-def kb_access_gate() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Подписаться", url=PARTNER_BOT_URL)],
-            [InlineKeyboardButton(text="Проверить", callback_data="check_partner_access")],
         ]
     )
 
@@ -153,48 +140,6 @@ def touch_user(db: DB, tg_user) -> None:
     db.ensure_user(tg_user.id, tg_user.username)
 
 
-async def send_access_gate_message(message: Message) -> None:
-    await message.answer(
-        "Перед использованием бота подпишитесь на наших спонсоров.",
-        reply_markup=kb_access_gate(),
-    )
-
-
-async def guard_partner_access_message(message: Message, db: DB) -> bool:
-    if message.chat.type != "private":
-        return False
-    if db.is_partner_verified(message.from_user.id):
-        return False
-    await send_access_gate_message(message)
-    return True
-
-
-async def guard_partner_access_callback(cb: CallbackQuery, db: DB) -> bool:
-    if cb.message.chat.type != "private":
-        return False
-    if db.is_partner_verified(cb.from_user.id):
-        return False
-    await cb.answer("Сначала пройди проверку", show_alert=False)
-    await cb.message.answer(
-        "Перед использованием бота подпишитесь на наших спонсоров.",
-        reply_markup=kb_access_gate(),
-    )
-    return True
-
-
-def extract_verified_user_id(text: str) -> int | None:
-    lowered = text.lower()
-    if "использует" not in lowered or "бот" not in lowered:
-        return None
-    match = PARTNER_USAGE_PATTERN.search(text)
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except (TypeError, ValueError):
-        return None
-
-
 async def guard_banned_message(message: Message, db: DB) -> bool:
     user_id = message.from_user.id
     if not db.is_banned(user_id):
@@ -218,8 +163,6 @@ async def start(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
 
     if not db.profile_complete(user_id):
@@ -252,8 +195,6 @@ async def prof_age(message: Message, db: DB, state: FSMContext) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    if await guard_partner_access_message(message, db):
-        return
     if not message.text:
         await message.answer("Напиши возраст числом.")
         return
@@ -276,8 +217,6 @@ async def cb_prof_gender(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
-    if await guard_partner_access_callback(cb, db):
-        return
     if await state.get_state() != ProfileStates.waiting_gender.state:
         await cb.answer()
         return
@@ -293,8 +232,6 @@ async def cb_prof_gender(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
 async def cb_prof_looking_for(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
-        return
-    if await guard_partner_access_callback(cb, db):
         return
     if await state.get_state() != ProfileStates.waiting_looking_for.state:
         await cb.answer()
@@ -315,8 +252,6 @@ async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
     about = (message.text or "").strip()
     if not about:
@@ -354,8 +289,6 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
     active_chat_user_id = db.get_active_chat_user(user_id)
     if active_chat_user_id is not None:
@@ -467,40 +400,14 @@ async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
-    if await guard_partner_access_callback(cb, db):
-        return
     await cb.answer()
     await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
-
-
-@router.callback_query(F.data == "check_partner_access")
-async def cb_check_partner_access(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
-    touch_user(db, cb.from_user)
-    if await guard_banned_callback(cb, db):
-        return
-    if db.is_partner_verified(cb.from_user.id):
-        await cb.answer("Проверка пройдена")
-        if not db.profile_complete(cb.from_user.id):
-            await state.set_state(ProfileStates.waiting_age)
-            await cb.message.answer(
-                "Проверка пройдена. Давай заполним профиль.\nСколько тебе лет? (числом) (18-100)",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="/start")]],
-                    resize_keyboard=True,
-                ),
-            )
-            return
-        await cb.message.answer("Проверка пройдена, доступ открыт.", reply_markup=main_kb())
-        return
-    await cb.answer("ID пока не найден. Сначала используй @anonymchat_rubot", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("referral:"))
 async def cb_referral(cb: CallbackQuery, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
-        return
-    if await guard_partner_access_callback(cb, db):
         return
     await cb.answer()
     user_id = cb.from_user.id
@@ -515,8 +422,6 @@ async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
-    if await guard_partner_access_callback(cb, db):
-        return
     await cb.answer()
     await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
 
@@ -525,8 +430,6 @@ async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
-        return
-    if await guard_partner_access_callback(cb, db):
         return
     await cb.answer("Спасибо за жалобу!", show_alert=False)
     try:
@@ -597,8 +500,6 @@ async def cb_rate(cb: CallbackQuery, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
-    if await guard_partner_access_callback(cb, db):
-        return
     # rating does not auto-advance; user can press "Следующее" manually
     try:
         _, raw_video_id, raw_value = cb.data.split(":", 2)
@@ -621,8 +522,6 @@ async def cb_rate(cb: CallbackQuery, db: DB) -> None:
 async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
-        return
-    if await guard_partner_access_callback(cb, db):
         return
 
     try:
@@ -667,8 +566,6 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 async def cb_rewrite(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
-        return
-    if await guard_partner_access_callback(cb, db):
         return
     await cb.answer()
     await state.set_state(RewriteStates.waiting_new_video)
@@ -741,8 +638,6 @@ async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    if await guard_partner_access_message(message, db):
-        return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
 
 
@@ -750,8 +645,6 @@ async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
 async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
 
     partner_user_id = db.end_chat(message.from_user.id)
@@ -771,8 +664,6 @@ async def cmd_my_video(message: Message, bot: Bot, db: DB) -> None:
     user_id = message.from_user.id
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
     video = db.get_user_video(user_id)
     if not video:
@@ -805,8 +696,6 @@ async def cmd_profile(message: Message, db: DB) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    if await guard_partner_access_message(message, db):
-        return
     profile = db.get_profile(user_id)
     if not profile or not profile.get("profile_complete"):
         await message.answer("Профиль не заполнен. Напиши /start.", reply_markup=main_kb())
@@ -828,8 +717,6 @@ async def cb_edit_profile(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
-    if await guard_partner_access_callback(cb, db):
-        return
     await cb.answer()
     await state.set_state(ProfileStates.waiting_age)
     await cb.message.answer(
@@ -843,8 +730,6 @@ async def btn_search(message: Message, bot: Bot, db: DB) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    if await guard_partner_access_message(message, db):
-        return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
 
 
@@ -852,8 +737,6 @@ async def btn_search(message: Message, bot: Bot, db: DB) -> None:
 async def btn_my_video(message: Message, bot: Bot, db: DB) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
     await cmd_my_video(message, bot, db)
 
@@ -863,19 +746,7 @@ async def btn_profile(message: Message, db: DB) -> None:
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    if await guard_partner_access_message(message, db):
-        return
     await cmd_profile(message, db)
-
-
-@router.message(F.chat.id == PARTNER_GROUP_ID, F.text)
-async def track_partner_group_confirmation(message: Message, db: DB) -> None:
-    verified_user_id = extract_verified_user_id(message.text or "")
-    if verified_user_id is None:
-        log.info("Partner group message ignored: %s", (message.text or "")[:200])
-        return
-    db.mark_partner_verified(verified_user_id)
-    log.info("Partner verification captured for user_id=%s", verified_user_id)
 
 
 @router.message()
@@ -883,13 +754,8 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
     if not message.from_user:
         return
 
-    if message.chat.id == PARTNER_GROUP_ID:
-        return
-
     touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
-        return
-    if await guard_partner_access_message(message, db):
         return
 
     if message.text and message.text.startswith("/"):
@@ -943,3 +809,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
