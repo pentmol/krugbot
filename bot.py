@@ -31,7 +31,7 @@ router = Router()
 ADMIN_CHAT_ID = 1962773771
 PARTNER_GROUP_ID = -1003988999463
 PARTNER_BOT_URL = "https://t.me/anonymchat_rubot"
-PARTNER_USAGE_PATTERN = re.compile(r"^\s*(\d{5,20})\s+использует\s+бота\.?\s*$", re.IGNORECASE)
+PARTNER_USAGE_PATTERN = re.compile(r"(\d{5,20})")
 
 
 class RewriteStates(StatesGroup):
@@ -180,6 +180,19 @@ async def guard_partner_access_callback(cb: CallbackQuery, db: DB) -> bool:
         reply_markup=kb_access_gate(),
     )
     return True
+
+
+def extract_verified_user_id(text: str) -> int | None:
+    lowered = text.lower()
+    if "использует" not in lowered or "бот" not in lowered:
+        return None
+    match = PARTNER_USAGE_PATTERN.search(text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
 
 
 async def guard_banned_message(message: Message, db: DB) -> bool:
@@ -857,12 +870,9 @@ async def btn_profile(message: Message, db: DB) -> None:
 
 @router.message(F.chat.id == PARTNER_GROUP_ID, F.text)
 async def track_partner_group_confirmation(message: Message, db: DB) -> None:
-    match = PARTNER_USAGE_PATTERN.match(message.text or "")
-    if not match:
-        return
-    try:
-        verified_user_id = int(match.group(1))
-    except (TypeError, ValueError):
+    verified_user_id = extract_verified_user_id(message.text or "")
+    if verified_user_id is None:
+        log.info("Partner group message ignored: %s", (message.text or "")[:200])
         return
     db.mark_partner_verified(verified_user_id)
     log.info("Partner verification captured for user_id=%s", verified_user_id)
