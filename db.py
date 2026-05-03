@@ -97,6 +97,16 @@ class DB:
             """
         )
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS partner_verifications (
+              user_id INTEGER PRIMARY KEY,
+              verified_at TEXT NOT NULL DEFAULT (datetime('now')),
+              FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            );
+            """
+        )
+
         self.conn.commit()
 
         # Backward-compatible migrations for existing DBs.
@@ -395,3 +405,22 @@ class DB:
         cur.execute("SELECT COUNT(*) AS c FROM complaints WHERE video_id=?;", (video_id,))
         row = cur.fetchone()
         return int(row["c"] if row else 0)
+
+    def mark_partner_verified(self, user_id: int) -> None:
+        self.ensure_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO partner_verifications(user_id, verified_at)
+            VALUES (?, datetime('now'))
+            ON CONFLICT(user_id) DO UPDATE SET verified_at=datetime('now');
+            """,
+            (user_id,),
+        )
+        self.conn.commit()
+
+    def is_partner_verified(self, user_id: int) -> bool:
+        self.ensure_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute("SELECT 1 FROM partner_verifications WHERE user_id=? LIMIT 1;", (user_id,))
+        return cur.fetchone() is not None
