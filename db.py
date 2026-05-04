@@ -33,6 +33,7 @@ class DB:
               username TEXT,
               has_video INTEGER NOT NULL DEFAULT 0,
               active_chat_user_id INTEGER,
+              partner_check_attempted INTEGER NOT NULL DEFAULT 0,
               age INTEGER,
               gender TEXT,
               looking_for TEXT,
@@ -126,6 +127,8 @@ class DB:
             add("username TEXT")
         if "active_chat_user_id" not in cols:
             add("active_chat_user_id INTEGER")
+        if "partner_check_attempted" not in cols:
+            add("partner_check_attempted INTEGER NOT NULL DEFAULT 0")
         if "gender" not in cols:
             add("gender TEXT")
         if "looking_for" not in cols:
@@ -424,3 +427,16 @@ class DB:
         cur = self.conn.cursor()
         cur.execute("SELECT 1 FROM partner_verifications WHERE user_id=? LIMIT 1;", (user_id,))
         return cur.fetchone() is not None
+
+    def set_partner_check_attempted(self, user_id: int) -> None:
+        self.ensure_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute("UPDATE users SET partner_check_attempted=1 WHERE user_id=?;", (user_id,))
+        self.conn.commit()
+
+    def partner_check_attempted(self, user_id: int) -> bool:
+        self.ensure_user(user_id)
+        cur = self.conn.cursor()
+        cur.execute("SELECT partner_check_attempted FROM users WHERE user_id=?;", (user_id,))
+        row = cur.fetchone()
+        return bool(row and row["partner_check_attempted"])
