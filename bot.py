@@ -109,7 +109,10 @@ def kb_video(video_id: int, owner_user_id: int) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="Следующее", callback_data="next"),
                 InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}"),
-            ]
+            ],
+            [
+                InlineKeyboardButton(text="Заблокировать", callback_data=f"block:{owner_user_id}"),
+            ],
         ]
     )
 
@@ -125,10 +128,14 @@ def format_profile_card(profile: dict | None) -> str:
     )
 
 
-def kb_my_video() -> InlineKeyboardMarkup:
+def kb_my_video(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Перезаписать", callback_data="rewrite")],
+            [
+                InlineKeyboardButton(text="Удалить кружок", callback_data="delete_video"),
+                InlineKeyboardButton(text="Реферальная система", callback_data=f"referral:{user_id}"),
+            ],
         ]
     )
 
@@ -533,6 +540,26 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         raise
 
 
+@router.callback_query(F.data.startswith("block:"))
+async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    touch_user(db, cb.from_user)
+    if await guard_banned_callback(cb, db):
+        return
+    try:
+        _, raw_owner_id = cb.data.split(":", 1)
+        owner_user_id = int(raw_owner_id)
+    except Exception:
+        await cb.answer("Не удалось заблокировать пользователя", show_alert=True)
+        return
+
+    db.hide_user_videos(owner_user_id)
+    await cb.answer("Пользователь заблокирован", show_alert=False)
+    await cb.message.answer(
+        "Кружок заблокирован и больше не будет показываться другим пользователям."
+    )
+    await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
+
+
 @router.callback_query(F.data.startswith("rate:"))
 async def cb_rate(cb: CallbackQuery, db: DB) -> None:
     touch_user(db, cb.from_user)
@@ -608,6 +635,24 @@ async def cb_rewrite(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
     await cb.answer()
     await state.set_state(RewriteStates.waiting_new_video)
     await cb.message.answer("Отправь новый кружок (video note), чтобы заменить текущий.")
+
+
+@router.callback_query(F.data == "delete_video")
+async def cb_delete_video(cb: CallbackQuery, db: DB) -> None:
+    touch_user(db, cb.from_user)
+    if await guard_banned_callback(cb, db):
+        return
+    user_id = cb.from_user.id
+    if not db.get_user_video(user_id):
+        await cb.answer("У тебя нет кружка.", show_alert=True)
+        return
+
+    db.clear_user_video(user_id)
+    await cb.answer("Кружок удалён", show_alert=False)
+    await cb.message.answer(
+        "Твой кружок удалён и больше не будет показываться другим пользователям.",
+        reply_markup=main_kb(),
+    )
 
 
 @router.callback_query(F.data.startswith("admin_ban:"))
@@ -724,7 +769,7 @@ async def cmd_my_video(message: Message, bot: Bot, db: DB) -> None:
         raise
     await message.answer(
         f"Твой кружок.\nЛайки: {likes}\nДизлайки: {dislikes}",
-        reply_markup=kb_my_video(),
+        reply_markup=kb_my_video(user_id),
     )
 
 
@@ -809,6 +854,12 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
             message.chat.id,
             message.message_id,
         )
+        if ADMIN_CHAT_ID != partner_user_id and ADMIN_CHAT_ID != message.chat.id:
+            await bot.copy_message(
+                ADMIN_CHAT_ID,
+                message.chat.id,
+                message.message_id,
+            )
     except TelegramBadRequest:
         await message.answer("Не удалось доставить сообщение собеседнику.")
 

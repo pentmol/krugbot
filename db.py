@@ -141,6 +141,8 @@ class DB:
             add("banned INTEGER NOT NULL DEFAULT 0")
         if "banned_notified" not in cols:
             add("banned_notified INTEGER NOT NULL DEFAULT 0")
+        if "video_hidden" not in cols:
+            add("video_hidden INTEGER NOT NULL DEFAULT 0")
 
         self.conn.commit()
 
@@ -293,6 +295,16 @@ class DB:
         cur.execute("UPDATE users SET has_video=0 WHERE user_id=?;", (owner_user_id,))
         self.conn.commit()
 
+    def hide_user_videos(self, owner_user_id: int) -> None:
+        self.ensure_user(owner_user_id)
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM videos WHERE owner_user_id=?;", (owner_user_id,))
+        cur.execute(
+            "UPDATE users SET has_video=0, video_hidden=1 WHERE user_id=?;",
+            (owner_user_id,),
+        )
+        self.conn.commit()
+
     def delete_video_by_id(self, video_id: int) -> Optional[int]:
         cur = self.conn.cursor()
         cur.execute("SELECT owner_user_id FROM videos WHERE id=?;", (video_id,))
@@ -327,7 +339,9 @@ class DB:
             """
             SELECT v.id, v.owner_user_id, v.file_id
             FROM videos v
+            JOIN users u ON u.user_id = v.owner_user_id
             WHERE v.owner_user_id != ?
+              AND u.video_hidden = 0
               AND NOT EXISTS (
                 SELECT 1
                 FROM views vw
