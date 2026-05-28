@@ -879,6 +879,7 @@ async def main() -> None:
         db_path = os.getenv("DB_PATH", "krugbot.sqlite3")
     db = DB(db_path)
     
+    
     try:
         log.info("Bot starting…")
         async with Bot(token=token) as bot:
