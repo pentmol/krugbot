@@ -442,16 +442,34 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
-    await cb.answer("Спасибо за жалобу!", show_alert=False)
+
     try:
-        _, raw_id = cb.data.split(":", 1)
-        video_id = int(raw_id)
+        parts = cb.data.split(":")
+        video_id = int(parts[1])
+        video_message_id = int(parts[2]) if len(parts) > 2 else 0
     except Exception:
-        await bot.send_message(cb.message.chat.id, "Не удалось обработать жалобу.")
+        await cb.answer("Не удалось обработать жалобу.", show_alert=True)
         return
 
     db.add_complaint(cb.from_user.id, video_id)
-    # Notify admin with the complained circle and a ban button.
+
+    # Убираем пожаловавшийся кружок и карточку из чата пользователя.
+    # Следующая анкета специально НЕ отправляется.
+    if video_message_id:
+        try:
+            await bot.delete_message(cb.message.chat.id, video_message_id)
+        except TelegramBadRequest:
+            pass
+
+    try:
+        await cb.message.delete()
+    except TelegramBadRequest:
+        pass
+
+    await cb.answer()
+    await bot.send_message(cb.message.chat.id, "Спасибо за жалобу!")
+
+    # Уведомляем администратора с кружком, на который пожаловались.
     try:
         cur = db.conn.cursor()
         cur.execute("SELECT owner_user_id, file_id FROM videos WHERE id=?;", (video_id,))
@@ -462,16 +480,9 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
             owner_username = db.get_username(owner_user_id)
             reporter_username = db.get_username(cb.from_user.id)
             try:
-                await bot.send_video_note(
-                    ADMIN_CHAT_ID,
-                    file_id,
-                    reply_markup=kb_admin_ban(owner_user_id),
-                )
+                await bot.send_video_note(ADMIN_CHAT_ID, file_id, reply_markup=kb_admin_ban(owner_user_id))
             except TelegramBadRequest:
-                await bot.send_message(
-                    ADMIN_CHAT_ID,
-                    "(не удалось отправить кружок: неверный file_id)",
-                )
+                await bot.send_message(ADMIN_CHAT_ID, "(не удалось отправить кружок: неверный file_id)")
             await bot.send_message(
                 ADMIN_CHAT_ID,
                 "Жалоба.\n"
@@ -481,30 +492,6 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
             )
     except Exception:
         log.exception("Failed to notify admin about complaint")
-    # Try to show next circle; if none, do not spam the user with "no new circles"
-    # right after a complaint.
-    video = db.pick_next_video(cb.from_user.id)
-    if not video:
-        return
-    db.mark_viewed(cb.from_user.id, video.id)
-    try:
-        await bot.send_video_note(
-            cb.message.chat.id,
-            video.file_id,
-        )
-        profile = db.get_profile(video.owner_user_id)
-        await bot.send_message(
-            cb.message.chat.id,
-            format_profile_card(profile),
-            reply_markup=kb_video(video.id, video.owner_user_id, cb.from_user.id),
-        )
-    except TelegramBadRequest as e:
-        msg = str(e)
-        if "wrong file identifier" in msg or "wrong file identifier/HTTP URL specified" in msg:
-            db.delete_video_by_id(video.id)
-            return
-        raise
-
 
 @router.callback_query(F.data.startswith("block:"))
 async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
