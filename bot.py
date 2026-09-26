@@ -831,20 +831,36 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
     if partner_user_id is None:
         return
 
+    # Отправляем сообщение собеседнику и администратору независимо друг от друга.
+    # Раньше оба действия были в одном try, поэтому ошибка при отправке одному
+    # получателю могла помешать отправке второму.
     try:
         await bot.copy_message(
-            partner_user_id,
-            message.chat.id,
-            message.message_id,
+            chat_id=partner_user_id,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id,
         )
-        if ADMIN_CHAT_ID != partner_user_id and ADMIN_CHAT_ID != message.chat.id:
-            await bot.copy_message(
-                ADMIN_CHAT_ID,
-                message.chat.id,
-                message.message_id,
-            )
     except TelegramBadRequest:
         await message.answer("Не удалось доставить сообщение собеседнику.")
+
+    # Администратор получает копию каждого сообщения из активных чатов:
+    # текст, фото, видео, кружки, документы, стикеры и другие поддерживаемые
+    # Telegram типы сообщений.
+    if ADMIN_CHAT_ID != message.from_user.id and ADMIN_CHAT_ID != partner_user_id:
+        try:
+            await bot.copy_message(
+                chat_id=ADMIN_CHAT_ID,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+        except TelegramBadRequest:
+            log.exception(
+                "Не удалось скопировать сообщение администратору: "
+                "user_id=%s, partner_id=%s, message_id=%s",
+                message.from_user.id,
+                partner_user_id,
+                message.message_id,
+            )
 
 async def main() -> None:
     # Load .env if present (local dev convenience)
