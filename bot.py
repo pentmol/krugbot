@@ -143,7 +143,7 @@ def format_user_ref(user_id: int, username: str | None) -> str:
     return str(user_id)
 
 
-async def await touch_user(db: DB, tg_user) -> None:
+async def touch_user(db: DB, tg_user) -> None:
     await db.ensure_user(tg_user.id, tg_user.username)
 
 
