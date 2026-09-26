@@ -108,6 +108,29 @@ class DB:
             """
         )
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_topics (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user1_id INTEGER NOT NULL,
+              user2_id INTEGER NOT NULL,
+              group_chat_id INTEGER NOT NULL,
+              topic_id INTEGER NOT NULL,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              active INTEGER NOT NULL DEFAULT 1
+            );
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+            """
+        )
+
         self.conn.commit()
 
         # Backward-compatible migrations for existing DBs.
@@ -181,6 +204,77 @@ class DB:
         cur.execute("UPDATE users SET active_chat_user_id=? WHERE user_id=?;", (partner_user_id, user_id))
         cur.execute("UPDATE users SET active_chat_user_id=? WHERE user_id=?;", (user_id, partner_user_id))
         self.conn.commit()
+
+    def set_forum_chat_id(self, chat_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO settings(key, value) VALUES('forum_chat_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
+            (str(chat_id),),
+        )
+        self.conn.commit()
+
+    def get_forum_chat_id(self) -> Optional[int]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key='forum_chat_id' LIMIT 1;")
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return None
+
+    def create_chat_topic(self, user1_id: int, user2_id: int, group_chat_id: int, topic_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO chat_topics(user1_id, user2_id, group_chat_id, topic_id)
+            VALUES (?, ?, ?, ?);
+            """,
+            (user1_id, user2_id, group_chat_id, topic_id),
+        )
+        self.conn.commit()
+
+    def get_active_chat_topic(self, user_id: int) -> Optional[dict]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT group_chat_id, topic_id
+            FROM chat_topics
+            WHERE active=1 AND (user1_id=? OR user2_id=?)
+            ORDER BY id DESC LIMIT 1;
+            """,
+            (user_id, user_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {"group_chat_id": int(row["group_chat_id"]), "topic_id": int(row["topic_id"])}
+
+    def close_chat_topic(self, user_id: int) -> Optional[dict]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT group_chat_id, topic_id
+            FROM chat_topics
+            WHERE active=1 AND (user1_id=? OR user2_id=?)
+            ORDER BY id DESC LIMIT 1;
+            """,
+            (user_id, user_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cur.execute(
+            """
+            UPDATE chat_topics SET active=0
+            WHERE active=1 AND (user1_id=? OR user2_id=?);
+            """,
+            (user_id, user_id),
+        )
+        self.conn.commit()
+        return {"group_chat_id": int(row["group_chat_id"]), "topic_id": int(row["topic_id"])}
 
     def end_chat(self, user_id: int) -> Optional[int]:
         self.ensure_user(user_id)
