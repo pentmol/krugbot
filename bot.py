@@ -471,12 +471,10 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
     # Уведомляем администратора с кружком, на который пожаловались.
     try:
-        cur = db.conn.cursor()
-        cur.execute("SELECT owner_user_id, file_id FROM videos WHERE id=?;", (video_id,))
-        row = cur.fetchone()
-        if row:
-            owner_user_id = int(row["owner_user_id"])
-            file_id = str(row["file_id"])
+        video_info = await db.get_video_info(video_id)
+        if video_info:
+            owner_user_id = video_info["owner_user_id"]
+            file_id = video_info["file_id"]
             owner_username = await db.get_username(owner_user_id)
             reporter_username = await db.get_username(cb.from_user.id)
             try:
