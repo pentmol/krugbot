@@ -352,19 +352,20 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
 
 
 async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -> None:
-    if db.is_banned(viewer_user_id):
-        # Don't spam banned users; they got a one-time notice on message handlers.
+    # All prerequisites come from one Supabase query instead of four.
+    state = db.get_search_state(viewer_user_id)
+    if state["banned"]:
         return
-    if db.get_active_chat_user(viewer_user_id) is not None:
+    if state["active_chat_user_id"] is not None:
         await bot.send_message(
             chat_id,
             "Сейчас ты находишься в чате. Заверши его кнопкой «🚫 Завершить чат», чтобы снова искать кружки.",
         )
         return
-    if not db.profile_complete(viewer_user_id):
+    if not state["profile_complete"]:
         await bot.send_message(chat_id, "Сначала заполни профиль через /start.")
         return
-    if not db.user_has_video(viewer_user_id):
+    if not state["has_video"]:
         await bot.send_message(
             chat_id,
             "Чтобы смотреть чужие кружки, сначала отправь свой кружок.",
