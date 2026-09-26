@@ -395,14 +395,14 @@ class DB:
             await conn.commit()
 
     async def set_profile(
+        self,
+        user_id: int,
+        age: int,
+        gender: str,
+        looking_for: str,
+        about: str,
+    ) -> None:
         async with self.pool.connection() as conn:
-            self,
-            user_id: int,
-            age: int,
-            gender: str,
-            looking_for: str,
-            about: str,
-        ) -> None:
             await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute(
