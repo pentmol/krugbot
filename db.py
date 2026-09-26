@@ -335,6 +335,8 @@ class DB:
     def pick_next_video(self, viewer_user_id: int) -> Optional[Video]:
         self.ensure_user(viewer_user_id)
         cur = self.conn.cursor()
+
+        # First show videos the user has never seen.
         cur.execute(
             """
             SELECT v.id, v.owner_user_id, v.file_id
@@ -354,6 +356,60 @@ class DB:
             (viewer_user_id, viewer_user_id),
         )
         row = cur.fetchone()
+        if row:
+            return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
+
+        # If everyone has already been seen, start showing them again.
+        # Do not repeat anyone from the last 5 viewed profiles when possible.
+        cur.execute(
+            """
+            SELECT v.id, v.owner_user_id, v.file_id
+            FROM videos v
+            JOIN users u ON u.user_id = v.owner_user_id
+            WHERE v.owner_user_id != ?
+              AND u.video_hidden = 0
+              AND NOT EXISTS (
+                SELECT 1
+                FROM (
+                  SELECT v2.owner_user_id
+                  FROM views vw2
+                  JOIN videos v2 ON v2.id = vw2.video_id
+                  WHERE vw2.viewer_user_id = ?
+                  ORDER BY vw2.viewed_at DESC
+                  LIMIT 5
+                ) recent
+                WHERE recent.owner_user_id = v.owner_user_id
+              )
+            ORDER BY (
+                SELECT vw3.viewed_at
+                FROM views vw3
+                WHERE vw3.viewer_user_id = ?
+                  AND vw3.video_id = v.id
+            ) ASC
+            LIMIT 1;
+            """,
+            (viewer_user_id, viewer_user_id, viewer_user_id),
+        )
+        row = cur.fetchone()
+
+        # With fewer than 6 available profiles, a strict 5-profile cooldown
+        # can leave no candidate. In that case, use the oldest viewed profile.
+        if not row:
+            cur.execute(
+                """
+                SELECT v.id, v.owner_user_id, v.file_id
+                FROM videos v
+                JOIN users u ON u.user_id = v.owner_user_id
+                JOIN views vw ON vw.video_id = v.id AND vw.viewer_user_id = ?
+                WHERE v.owner_user_id != ?
+                  AND u.video_hidden = 0
+                ORDER BY vw.viewed_at ASC
+                LIMIT 1;
+                """,
+                (viewer_user_id, viewer_user_id),
+            )
+            row = cur.fetchone()
+
         if not row:
             return None
         return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
@@ -362,7 +418,12 @@ class DB:
         self.ensure_user(viewer_user_id)
         cur = self.conn.cursor()
         cur.execute(
-            "INSERT OR IGNORE INTO views(viewer_user_id, video_id) VALUES (?, ?);",
+            """
+            INSERT INTO views(viewer_user_id, video_id, viewed_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(viewer_user_id, video_id) DO UPDATE SET
+              viewed_at=datetime('now');
+            """,
             (viewer_user_id, video_id),
         )
         self.conn.commit()
