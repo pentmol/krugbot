@@ -916,13 +916,10 @@ async def main() -> None:
     if not token:
         raise RuntimeError("Set BOT_TOKEN env var")
 
-    # Используем /data на Railway для постоянного хранения
-    if os.path.exists('/data'):
-        db_path = '/data/krugbot.sqlite3'
-        os.makedirs('/data', exist_ok=True)
-    else:
-        db_path = os.getenv("DB_PATH", "krugbot.sqlite3")
-    db = DB(db_path)
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("Set DATABASE_URL environment variable")
+    db = DB(database_url)
     
     try:
         log.info("Bot starting…")
