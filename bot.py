@@ -502,7 +502,7 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await bot.send_message(
             cb.message.chat.id,
             format_profile_card(profile),
-            reply_markup=kb_video(video.id, video.owner_user_id, viewer_user_id),
+            reply_markup=kb_video(video.id, video.owner_user_id, cb.from_user.id),
         )
     except TelegramBadRequest as e:
         msg = str(e)
