@@ -88,13 +88,13 @@ def kb_ready(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int) -> InlineKeyboardMarkup:
+def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int, video_message_id: int | None = None) -> InlineKeyboardMarkup:
     # Оставляем только одну кнопку жалобы.
     # Лайков/дизлайков в карточке профиля нет.
     complaint_or_block = (
         InlineKeyboardButton(text="Заблокировать", callback_data=f"block:{owner_user_id}")
         if viewer_user_id == ADMIN_CHAT_ID
-        else InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}")
+        else InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}:{video_message_id or 0}")
     )
 
     return InlineKeyboardMarkup(
@@ -387,7 +387,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
 
         db.mark_viewed(viewer_user_id, video.id)
         try:
-            await bot.send_video_note(
+            video_message = await bot.send_video_note(
                 chat_id,
                 video.file_id,
             )
@@ -395,7 +395,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             await bot.send_message(
                 chat_id,
                 format_profile_card(profile),
-                reply_markup=kb_video(video.id, video.owner_user_id, viewer_user_id),
+                reply_markup=kb_video(video.id, video.owner_user_id, viewer_user_id, video_message_id=video_message.message_id),
             )
             return
         except TelegramBadRequest as e:
