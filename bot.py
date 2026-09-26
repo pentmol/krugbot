@@ -87,7 +87,15 @@ def kb_ready(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def kb_video(video_id: int, owner_user_id: int) -> InlineKeyboardMarkup:
+def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int) -> InlineKeyboardMarkup:
+    # Только администратор видит кнопку «Заблокировать».
+    # Для остальных пользователей на этом месте показываем «Жалоба».
+    bottom_button = (
+        InlineKeyboardButton(text="Заблокировать", callback_data=f"block:{owner_user_id}")
+        if viewer_user_id == ADMIN_CHAT_ID
+        else InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}")
+    )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -101,9 +109,7 @@ def kb_video(video_id: int, owner_user_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Следующее", callback_data="next"),
                 InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}"),
             ],
-            [
-                InlineKeyboardButton(text="Заблокировать", callback_data=f"block:{owner_user_id}"),
-            ],
+            [bottom_button],
         ]
     )
 
@@ -395,7 +401,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             await bot.send_message(
                 chat_id,
                 format_profile_card(profile),
-                reply_markup=kb_video(video.id, video.owner_user_id),
+                reply_markup=kb_video(video.id, video.owner_user_id, viewer_user_id),
             )
             return
         except TelegramBadRequest as e:
@@ -496,7 +502,7 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await bot.send_message(
             cb.message.chat.id,
             format_profile_card(profile),
-            reply_markup=kb_video(video.id, video.owner_user_id),
+            reply_markup=kb_video(video.id, video.owner_user_id, viewer_user_id),
         )
     except TelegramBadRequest as e:
         msg = str(e)
@@ -509,6 +515,9 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 @router.callback_query(F.data.startswith("block:"))
 async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     touch_user(db, cb.from_user)
+    if cb.from_user.id != ADMIN_CHAT_ID:
+        await cb.answer("Недостаточно прав", show_alert=True)
+        return
     if await guard_banned_callback(cb, db):
         return
     try:
