@@ -590,7 +590,51 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.message.answer("Этот пользователь сейчас уже находится в другом чате.")
         return
 
+    # Создаём отдельную тему в админской форум-группе для каждого нового чата.
+    forum_chat_id = db.get_forum_chat_id()
+    if forum_chat_id is None:
+        await cb.answer()
+        await cb.message.answer(
+            "Чат пока нельзя начать: администратор ещё не настроил группу для чатов."
+        )
+        return
+
+    try:
+        owner_username = db.get_username(owner_user_id)
+        viewer_name = cb.from_user.username or str(cb.from_user.id)
+        owner_name = owner_username or str(owner_user_id)
+        topic = await bot.create_forum_topic(
+            chat_id=forum_chat_id,
+            name=f"💬 {viewer_name} ↔ {owner_name}",
+        )
+        topic_id = topic.message_thread_id
+        await bot.send_message(
+            chat_id=forum_chat_id,
+            message_thread_id=topic_id,
+            text=(
+                "🔵 Новый чат\n\n"
+                f"Пользователь 1: {cb.from_user.id}"
+                f"{f' (@{cb.from_user.username})' if cb.from_user.username else ''}\n"
+                f"Пользователь 2: {owner_user_id}"
+                f"{f' (@{owner_username})' if owner_username else ''}"
+            ),
+        )
+    except TelegramBadRequest:
+        log.exception("Не удалось создать тему для чата")
+        await cb.answer()
+        await cb.message.answer(
+            "Не удалось создать тему для чата. Проверь, что бот добавлен администратором "
+            "в форум-группу и у него есть право управлять темами."
+        )
+        return
+
     db.start_chat(cb.from_user.id, owner_user_id)
+    db.create_chat_topic(
+        cb.from_user.id,
+        owner_user_id,
+        forum_chat_id,
+        topic_id,
+    )
     await cb.answer()
 
     # После начала чата убираем кнопки с карточки пользователя,
@@ -707,6 +751,22 @@ async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
 
 
+@router.message(F.text == "/setforum")
+async def cmd_setforum(message: Message, db: DB) -> None:
+    touch_user(db, message.from_user)
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    if message.chat.type != "supergroup" or not getattr(message.chat, "is_forum", False):
+        await message.answer("Эту команду нужно отправить в супергруппе с включёнными темами.")
+        return
+
+    db.set_forum_chat_id(message.chat.id)
+    await message.answer(
+        "✅ Группа для чатов настроена. Теперь каждый новый чат будет создаваться "
+        "в отдельной теме, а после /stopchat тема будет закрываться."
+    )
+
+
 @router.message(F.text == "/stopchat")
 async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
     touch_user(db, message.from_user)
@@ -717,6 +777,16 @@ async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
     if partner_user_id is None:
         await message.answer("Сейчас у тебя нет активного чата.")
         return
+
+    topic = db.close_chat_topic(message.from_user.id)
+    if topic:
+        try:
+            await bot.close_forum_topic(
+                chat_id=topic["group_chat_id"],
+                message_thread_id=topic["topic_id"],
+            )
+        except TelegramBadRequest:
+            log.exception("Не удалось закрыть тему чата: topic_id=%s", topic["topic_id"])
 
     await message.answer("Чат завершён.")
     try:
@@ -843,23 +913,26 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
     except TelegramBadRequest:
         await message.answer("Не удалось доставить сообщение собеседнику.")
 
-    # Администратор получает копию каждого сообщения из активных чатов:
+    # Копируем каждое сообщение в отдельную тему админской форум-группы:
     # текст, фото, видео, кружки, документы, стикеры и другие поддерживаемые
     # Telegram типы сообщений.
-    if ADMIN_CHAT_ID != message.from_user.id and ADMIN_CHAT_ID != partner_user_id:
+    topic = db.get_active_chat_topic(message.from_user.id)
+    if topic:
         try:
             await bot.copy_message(
-                chat_id=ADMIN_CHAT_ID,
+                chat_id=topic["group_chat_id"],
                 from_chat_id=message.chat.id,
                 message_id=message.message_id,
+                message_thread_id=topic["topic_id"],
             )
         except TelegramBadRequest:
             log.exception(
-                "Не удалось скопировать сообщение администратору: "
-                "user_id=%s, partner_id=%s, message_id=%s",
+                "Не удалось скопировать сообщение в тему: "
+                "user_id=%s, partner_id=%s, message_id=%s, topic_id=%s",
                 message.from_user.id,
                 partner_user_id,
                 message.message_id,
+                topic["topic_id"],
             )
 
 async def main() -> None:
