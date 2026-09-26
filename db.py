@@ -43,7 +43,6 @@ class DB:
 
     async def _init(self) -> None:
         async with self.pool.connection() as conn:
-        async with self.pool.connection() as conn:
             cur = conn.cursor()
 
             await cur.execute(
