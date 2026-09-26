@@ -143,22 +143,22 @@ def format_user_ref(user_id: int, username: str | None) -> str:
     return str(user_id)
 
 
-def touch_user(db: DB, tg_user) -> None:
-    db.ensure_user(tg_user.id, tg_user.username)
+async def await touch_user(db: DB, tg_user) -> None:
+    await db.ensure_user(tg_user.id, tg_user.username)
 
 
 async def guard_banned_message(message: Message, db: DB) -> bool:
     user_id = message.from_user.id
-    if not db.is_banned(user_id):
+    if not await db.is_banned(user_id):
         return False
-    if not db.banned_notified(user_id):
+    if not await db.banned_notified(user_id):
         await message.answer("Ты забанен(а) и не можешь пользоваться ботом.")
-        db.set_banned_notified(user_id)
+        await db.set_banned_notified(user_id)
     return True
 
 
 async def guard_banned_callback(cb: CallbackQuery, db: DB) -> bool:
-    if not db.is_banned(cb.from_user.id):
+    if not await db.is_banned(cb.from_user.id):
         return False
     await cb.answer()
     return True
@@ -166,7 +166,7 @@ async def guard_banned_callback(cb: CallbackQuery, db: DB) -> bool:
 
 async def continue_after_start_gate(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
-    if not db.profile_complete(user_id):
+    if not await db.profile_complete(user_id):
         await state.set_state(ProfileStates.waiting_age)
         await message.answer(
             "Привет! Давай заполним профиль.\nСколько тебе лет? (числом) (18-100)",
@@ -177,7 +177,7 @@ async def continue_after_start_gate(message: Message, db: DB, state: FSMContext)
         )
         return
 
-    if db.user_has_video(user_id):
+    if await db.user_has_video(user_id):
         await message.answer(
             "Ты уже отправлял(а) кружок. Теперь можешь смотреть чужие.",
             reply_markup=main_kb(),
@@ -193,7 +193,7 @@ async def continue_after_start_gate(message: Message, db: DB, state: FSMContext)
 
 @router.message(CommandStart())
 async def start(message: Message, db: DB, state: FSMContext) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
 
@@ -202,7 +202,7 @@ async def start(message: Message, db: DB, state: FSMContext) -> None:
 
 @router.message(ProfileStates.waiting_age)
 async def prof_age(message: Message, db: DB, state: FSMContext) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     if not message.text:
@@ -224,7 +224,7 @@ async def prof_age(message: Message, db: DB, state: FSMContext) -> None:
 
 @router.callback_query(F.data.in_(["gender:M", "gender:F"]))
 async def cb_prof_gender(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     if await state.get_state() != ProfileStates.waiting_gender.state:
@@ -240,7 +240,7 @@ async def cb_prof_gender(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
 
 @router.callback_query(F.data.in_(["looking:M", "looking:F"]))
 async def cb_prof_looking_for(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     if await state.get_state() != ProfileStates.waiting_looking_for.state:
@@ -260,7 +260,7 @@ async def cb_prof_looking_for(cb: CallbackQuery, state: FSMContext, db: DB) -> N
 @router.message(ProfileStates.waiting_about)
 async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     about = (message.text or "").strip()
@@ -272,7 +272,7 @@ async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
         return
 
     data = await state.get_data()
-    db.set_profile(
+    await db.set_profile(
         user_id,
         age=int(data["age"]),
         gender=str(data["gender"]),
@@ -280,7 +280,7 @@ async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
         about=about,
     )
     await state.clear()
-    if db.user_has_video(user_id):
+    if await db.user_has_video(user_id):
         await message.answer(
             "Профиль создан.\nУ тебя уже есть кружок — теперь можешь искать.",
             reply_markup=main_kb(),
@@ -297,10 +297,10 @@ async def prof_about(message: Message, db: DB, state: FSMContext) -> None:
 @router.message(F.video_note)
 async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
     user_id = message.from_user.id
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    active_chat_user_id = db.get_active_chat_user(user_id)
+    active_chat_user_id = await db.get_active_chat_user(user_id)
     if active_chat_user_id is not None:
         try:
             await message.bot.copy_message(
@@ -311,7 +311,7 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
         except TelegramBadRequest:
             await message.answer("Не удалось доставить кружок собеседнику.")
         return
-    if not db.profile_complete(user_id):
+    if not await db.profile_complete(user_id):
         await message.answer("Сначала заполни профиль через /start.")
         return
     # Don't allow changing video while user is in profile onboarding/edit flow.
@@ -325,7 +325,7 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
         return
     current_state = await state.get_state()
     if current_state == RewriteStates.waiting_new_video.state:
-        db.set_user_video(user_id, message.video_note.file_id)
+        await db.set_user_video(user_id, message.video_note.file_id)
         await state.clear()
         await message.answer(
             "Готово, твой кружок обновлен. Теперь другие пользователи видят твой кружок.\n"
@@ -335,14 +335,14 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
         )
         return
 
-    if db.user_has_video(user_id):
+    if await db.user_has_video(user_id):
         await message.answer(
             "У тебя уже установлен кружок. Если хочешь установить новый — используй кнопку «Мой кружок».",
             reply_markup=main_kb(),
         )
         return
 
-    db.set_user_video(user_id, message.video_note.file_id)
+    await db.set_user_video(user_id, message.video_note.file_id)
     await message.answer(
         "Готово, твой кружок установлен. Теперь другие пользователи видят твой кружок.\n"
         "Нажми «Искать» или кнопку «Смотреть».\n"
@@ -353,7 +353,7 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
 
 async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -> None:
     # All prerequisites come from one Supabase query instead of four.
-    state = db.get_search_state(viewer_user_id)
+    state = await db.get_search_state(viewer_user_id)
     if state["banned"]:
         return
     if state["active_chat_user_id"] is not None:
@@ -376,7 +376,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
     # Telegram returns "wrong file identifier". In that case we drop the record
     # and try another one.
     for _ in range(10):
-        video = db.pick_next_video(viewer_user_id)
+        video = await db.pick_next_video(viewer_user_id)
         if not video:
             await bot.send_message(
                 chat_id,
@@ -385,13 +385,13 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             )
             return
 
-        db.mark_viewed(viewer_user_id, video.id)
+        await db.mark_viewed(viewer_user_id, video.id)
         try:
             video_message = await bot.send_video_note(
                 chat_id,
                 video.file_id,
             )
-            profile = db.get_profile(video.owner_user_id)
+            profile = await db.get_profile(video.owner_user_id)
             await bot.send_message(
                 chat_id,
                 format_profile_card(profile),
@@ -401,14 +401,14 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
         except TelegramBadRequest as e:
             msg = str(e)
             if "wrong file identifier" in msg or "wrong file identifier/HTTP URL specified" in msg:
-                db.delete_video_by_id(video.id)
+                await db.delete_video_by_id(video.id)
                 continue
             raise
 
 
 @router.callback_query(F.data == "watch")
 async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -417,7 +417,7 @@ async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("referral:"))
 async def cb_referral(cb: CallbackQuery, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -430,7 +430,7 @@ async def cb_referral(cb: CallbackQuery, db: DB) -> None:
 
 @router.callback_query(F.data == "next")
 async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -439,7 +439,7 @@ async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("complaint:"))
 async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
 
@@ -451,7 +451,7 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.answer("Не удалось обработать жалобу.", show_alert=True)
         return
 
-    db.add_complaint(cb.from_user.id, video_id)
+    await db.add_complaint(cb.from_user.id, video_id)
 
     # Убираем пожаловавшийся кружок и карточку из чата пользователя.
     # Следующая анкета специально НЕ отправляется.
@@ -477,8 +477,8 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         if row:
             owner_user_id = int(row["owner_user_id"])
             file_id = str(row["file_id"])
-            owner_username = db.get_username(owner_user_id)
-            reporter_username = db.get_username(cb.from_user.id)
+            owner_username = await db.get_username(owner_user_id)
+            reporter_username = await db.get_username(cb.from_user.id)
             try:
                 await bot.send_video_note(ADMIN_CHAT_ID, file_id, reply_markup=kb_admin_ban(owner_user_id))
             except TelegramBadRequest:
@@ -495,7 +495,7 @@ async def cb_complaint(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("block:"))
 async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if cb.from_user.id != ADMIN_CHAT_ID:
         await cb.answer("Недостаточно прав", show_alert=True)
         return
@@ -508,7 +508,7 @@ async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.answer("Не удалось заблокировать пользователя", show_alert=True)
         return
 
-    db.hide_user_videos(owner_user_id)
+    await db.hide_user_videos(owner_user_id)
     await cb.answer("Пользователь заблокирован", show_alert=False)
     await cb.message.answer(
         "Кружок заблокирован и больше не будет показываться другим пользователям."
@@ -518,7 +518,7 @@ async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("chat_start:"))
 async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
 
@@ -529,7 +529,7 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.answer("Не удалось начать чат", show_alert=True)
         return
 
-    current_partner = db.get_active_chat_user(cb.from_user.id)
+    current_partner = await db.get_active_chat_user(cb.from_user.id)
     if current_partner is not None and current_partner != owner_user_id:
         await cb.answer()
         await cb.message.answer(
@@ -542,7 +542,7 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.message.answer("Ты уже в чате с этим пользователем. Для завершения используй кнопку «🚫 Завершить чат».")
         return
 
-    owner_partner = db.get_active_chat_user(owner_user_id)
+    owner_partner = await db.get_active_chat_user(owner_user_id)
     if owner_partner is not None and owner_partner != cb.from_user.id:
         await cb.answer()
         await cb.message.answer("Этот пользователь сейчас уже находится в другом чате.")
@@ -551,11 +551,11 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     # Пытаемся создать отдельную тему в админской форум-группе.
     # Если форум не настроен или Telegram не позволяет создать тему,
     # это не должно мешать самому чату между пользователями.
-    forum_chat_id = db.get_forum_chat_id()
+    forum_chat_id = await db.get_forum_chat_id()
     topic_id = None
 
     if forum_chat_id is not None:
-        owner_username = db.get_username(owner_user_id)
+        owner_username = await db.get_username(owner_user_id)
         viewer_name = cb.from_user.username or str(cb.from_user.id)
         owner_name = owner_username or str(owner_user_id)
 
@@ -587,11 +587,11 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
             log.exception("Не удалось создать тему для чата. Чат всё равно будет запущен.")
 
     # Сам чат запускается независимо от результата создания форум-темы.
-    db.start_chat(cb.from_user.id, owner_user_id)
+    await db.start_chat(cb.from_user.id, owner_user_id)
 
     # Сохраняем связь с темой только если тема действительно была создана.
     if forum_chat_id is not None and topic_id is not None:
-        db.create_chat_topic(
+        await db.create_chat_topic(
             cb.from_user.id,
             owner_user_id,
             forum_chat_id,
@@ -618,7 +618,7 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
 @router.callback_query(F.data == "rewrite")
 async def cb_rewrite(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -628,15 +628,15 @@ async def cb_rewrite(cb: CallbackQuery, state: FSMContext, db: DB) -> None:
 
 @router.callback_query(F.data == "delete_video")
 async def cb_delete_video(cb: CallbackQuery, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     user_id = cb.from_user.id
-    if not db.get_user_video(user_id):
+    if not await db.get_user_video(user_id):
         await cb.answer("У тебя нет кружка.", show_alert=True)
         return
 
-    db.clear_user_video(user_id)
+    await db.clear_user_video(user_id)
     await cb.answer("Кружок удалён", show_alert=False)
     await cb.message.answer(
         "Твой кружок удалён и больше не будет показываться другим пользователям.",
@@ -646,7 +646,7 @@ async def cb_delete_video(cb: CallbackQuery, db: DB) -> None:
 
 @router.callback_query(F.data.startswith("admin_ban:"))
 async def cb_admin_ban(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if cb.from_user.id != ADMIN_CHAT_ID:
         await cb.answer("Недостаточно прав", show_alert=True)
         return
@@ -657,8 +657,8 @@ async def cb_admin_ban(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.answer("Ошибка", show_alert=True)
         return
 
-    db.ban_user(target_user_id)
-    db.clear_user_video(target_user_id)
+    await db.ban_user(target_user_id)
+    await db.clear_user_video(target_user_id)
     await cb.answer("Пользователь забанен", show_alert=False)
     await bot.send_message(ADMIN_CHAT_ID, f"Забанен пользователь: {target_user_id}")
 
@@ -707,7 +707,7 @@ async def set_commands(bot: Bot) -> None:
 
 @router.message(F.text == "/search")
 async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
@@ -715,14 +715,14 @@ async def cmd_search(message: Message, bot: Bot, db: DB) -> None:
 
 @router.message(F.text == "/setforum")
 async def cmd_setforum(message: Message, db: DB) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if message.from_user.id != ADMIN_CHAT_ID:
         return
     if message.chat.type != "supergroup" or not getattr(message.chat, "is_forum", False):
         await message.answer("Эту команду нужно отправить в супергруппе с включёнными темами.")
         return
 
-    db.set_forum_chat_id(message.chat.id)
+    await db.set_forum_chat_id(message.chat.id)
     await message.answer(
         "✅ Группа для чатов настроена. Теперь каждый новый чат будет создаваться "
         "в отдельной теме, а после /stopchat тема будет закрываться."
@@ -731,16 +731,16 @@ async def cmd_setforum(message: Message, db: DB) -> None:
 
 @router.message(F.text == "/stopchat")
 async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
 
-    partner_user_id = db.end_chat(message.from_user.id)
+    partner_user_id = await db.end_chat(message.from_user.id)
     if partner_user_id is None:
         await message.answer("Сейчас у тебя нет активного чата.")
         return
 
-    topic = db.close_chat_topic(message.from_user.id)
+    topic = await db.close_chat_topic(message.from_user.id)
     if topic:
         try:
             await bot.close_forum_topic(
@@ -766,22 +766,22 @@ async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
 @router.message(F.text == "/my_video")
 async def cmd_my_video(message: Message, bot: Bot, db: DB) -> None:
     user_id = message.from_user.id
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    video = db.get_user_video(user_id)
+    video = await db.get_user_video(user_id)
     if not video:
         await message.answer("Сначала отправь свой кружок (video note).", reply_markup=main_kb())
         return
 
-    likes = db.get_video_likes(video.id)
-    dislikes = db.get_video_dislikes(video.id)
+    likes = await db.get_video_likes(video.id)
+    dislikes = await db.get_video_dislikes(video.id)
     try:
         await bot.send_video_note(message.chat.id, video.file_id)
     except TelegramBadRequest as e:
         msg = str(e)
         if "wrong file identifier" in msg or "wrong file identifier/HTTP URL specified" in msg:
-            db.clear_user_video(user_id)
+            await db.clear_user_video(user_id)
             await message.answer(
                 "Твой старый кружок больше недоступен (скорее всего менялся токен бота). Отправь кружок заново.",
                 reply_markup=main_kb(),
@@ -797,10 +797,10 @@ async def cmd_my_video(message: Message, bot: Bot, db: DB) -> None:
 @router.message(F.text == "/profile")
 async def cmd_profile(message: Message, db: DB) -> None:
     user_id = message.from_user.id
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
-    profile = db.get_profile(user_id)
+    profile = await db.get_profile(user_id)
     if not profile or not profile.get("profile_complete"):
         await message.answer("Профиль не заполнен. Напиши /start.", reply_markup=main_kb())
         return
@@ -818,7 +818,7 @@ async def cmd_profile(message: Message, db: DB) -> None:
 
 @router.callback_query(F.data == "edit_profile")
 async def cb_edit_profile(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
-    touch_user(db, cb.from_user)
+    await touch_user(db, cb.from_user)
     if await guard_banned_callback(cb, db):
         return
     await cb.answer()
@@ -836,7 +836,7 @@ async def btn_stopchat(message: Message, bot: Bot, db: DB) -> None:
 
 @router.message(F.text == "🔍 Искать")
 async def btn_search(message: Message, bot: Bot, db: DB) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await send_next_video(bot, message.chat.id, message.from_user.id, db)
@@ -844,7 +844,7 @@ async def btn_search(message: Message, bot: Bot, db: DB) -> None:
 
 @router.message(F.text == "⭕️ Мой кружок")
 async def btn_my_video(message: Message, bot: Bot, db: DB) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await cmd_my_video(message, bot, db)
@@ -852,7 +852,7 @@ async def btn_my_video(message: Message, bot: Bot, db: DB) -> None:
 
 @router.message(F.text == "👤 Мой профиль")
 async def btn_profile(message: Message, db: DB) -> None:
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
     await cmd_profile(message, db)
@@ -863,14 +863,14 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
     if not message.from_user:
         return
 
-    touch_user(db, message.from_user)
+    await touch_user(db, message.from_user)
     if await guard_banned_message(message, db):
         return
 
     if message.text and message.text.startswith("/"):
         return
 
-    partner_user_id = db.get_active_chat_user(message.from_user.id)
+    partner_user_id = await db.get_active_chat_user(message.from_user.id)
     if partner_user_id is None:
         return
 
@@ -889,7 +889,7 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
     # Копируем каждое сообщение в отдельную тему админской форум-группы:
     # текст, фото, видео, кружки, документы, стикеры и другие поддерживаемые
     # Telegram типы сообщений.
-    topic = db.get_active_chat_topic(message.from_user.id)
+    topic = await db.get_active_chat_topic(message.from_user.id)
     if topic:
         try:
             await bot.copy_message(
@@ -919,7 +919,7 @@ async def main() -> None:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("Set DATABASE_URL environment variable")
-    db = DB(database_url)
+    db = await DB.create(database_url)
     
     try:
         log.info("Bot starting…")
@@ -935,7 +935,7 @@ async def main() -> None:
             log.info("Polling started. Press Ctrl+C to stop.")
             await dp.start_polling(bot, db=db)
     finally:
-        db.close()
+        await db.close()
 
 
 if __name__ == "__main__":
