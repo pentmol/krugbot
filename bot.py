@@ -103,14 +103,9 @@ def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int) -> InlineKe
                 InlineKeyboardButton(text="Начать чат", callback_data=f"chat_start:{owner_user_id}"),
             ],
             [
-                InlineKeyboardButton(text="👍", callback_data=f"rate:{video_id}:1"),
-                InlineKeyboardButton(text="👎", callback_data=f"rate:{video_id}:-1"),
-            ],
-            [
                 InlineKeyboardButton(text="Следующее", callback_data="next"),
-                InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}"),
+                bottom_button,
             ],
-            [bottom_button],
         ]
     )
 
@@ -796,7 +791,7 @@ async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
     await message.answer("Чат завершён.", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🔍 Искать")],
-            [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="⭕️ Мой кружок")],
+            [KeyboardButton(text="⭕️ Мой кружок")],
         ],
         resize_keyboard=True,
     ))
