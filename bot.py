@@ -100,8 +100,10 @@ def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int) -> InlineKe
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Начать чат", callback_data=f"chat_start:{owner_user_id}")],
-            [InlineKeyboardButton(text="Следующее", callback_data="next")],
-            [complaint_or_block],
+            [
+                InlineKeyboardButton(text="Следующее", callback_data="next"),
+                complaint_or_block,
+            ],
         ]
     )
 
