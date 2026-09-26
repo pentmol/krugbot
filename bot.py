@@ -583,6 +583,14 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
     db.start_chat(cb.from_user.id, owner_user_id)
     await cb.answer()
+
+    # После начала чата убираем кнопки с карточки пользователя,
+    # чтобы нельзя было повторно нажимать «Начать чат».
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+
     await cb.message.answer("Теперь вы в чате с этим пользователем. Чтобы закончить чат, используй /stopchat.")
     try:
         await bot.send_message(
