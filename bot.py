@@ -78,15 +78,6 @@ def kb_watch() -> InlineKeyboardMarkup:
     )
 
 
-def kb_partner_gate() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Подписаться", url="https://t.me/anonymchat_rubot?start=")],
-            [InlineKeyboardButton(text="Проверить", callback_data="partner_check")],
-        ]
-    )
-
-
 def kb_ready(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -207,32 +198,7 @@ async def start(message: Message, db: DB, state: FSMContext) -> None:
     if await guard_banned_message(message, db):
         return
 
-    if not db.is_partner_verified(message.from_user.id):
-        await message.answer(
-            "Чтобы начать пользоваться ботом, подпишитесь на наших спонсоров.",
-            reply_markup=kb_partner_gate(),
-        )
-        return
-
     await continue_after_start_gate(message, db, state)
-
-
-@router.callback_query(F.data == "partner_check")
-async def cb_partner_check(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
-    touch_user(db, cb.from_user)
-    if await guard_banned_callback(cb, db):
-        return
-
-    user_id = cb.from_user.id
-    if not db.partner_check_attempted(user_id):
-        db.set_partner_check_attempted(user_id)
-        await cb.answer("Вы не подписаны!", show_alert=True)
-        return
-
-    db.mark_partner_verified(user_id)
-    await cb.answer("Проверка пройдена")
-    await cb.message.answer("Готово! Доступ открыт.")
-    await continue_after_start_gate(cb.message, db, state)
 
 
 @router.message(ProfileStates.waiting_age)
