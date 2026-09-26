@@ -279,6 +279,31 @@ class DB:
         self.conn.commit()
         return partner_user_id
 
+    def get_search_state(self, user_id: int) -> dict:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT banned, active_chat_user_id, profile_complete, has_video
+            FROM users
+            WHERE user_id=%s;
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {
+                "banned": False,
+                "active_chat_user_id": None,
+                "profile_complete": False,
+                "has_video": False,
+            }
+        return {
+            "banned": bool(row["banned"]),
+            "active_chat_user_id": row["active_chat_user_id"],
+            "profile_complete": bool(row["profile_complete"]),
+            "has_video": bool(row["has_video"]),
+        }
+
     def user_has_video(self, user_id: int) -> bool:
         cur = self.conn.cursor()
         cur.execute("SELECT has_video FROM users WHERE user_id=%s;", (user_id,))
