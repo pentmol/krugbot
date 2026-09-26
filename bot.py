@@ -590,51 +590,55 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         await cb.message.answer("Этот пользователь сейчас уже находится в другом чате.")
         return
 
-    # Создаём отдельную тему в админской форум-группе для каждого нового чата.
+    # Пытаемся создать отдельную тему в админской форум-группе.
+    # Если форум не настроен или Telegram не позволяет создать тему,
+    # это не должно мешать самому чату между пользователями.
     forum_chat_id = db.get_forum_chat_id()
-    if forum_chat_id is None:
-        await cb.answer()
-        await cb.message.answer(
-            "Чат пока нельзя начать: администратор ещё не настроил группу для чатов."
-        )
-        return
+    topic_id = None
 
-    try:
+    if forum_chat_id is not None:
         owner_username = db.get_username(owner_user_id)
         viewer_name = cb.from_user.username or str(cb.from_user.id)
         owner_name = owner_username or str(owner_user_id)
-        topic = await bot.create_forum_topic(
-            chat_id=forum_chat_id,
-            name=f"💬 {viewer_name} ↔ {owner_name}",
-        )
-        topic_id = topic.message_thread_id
-        await bot.send_message(
-            chat_id=forum_chat_id,
-            message_thread_id=topic_id,
-            text=(
-                "🔵 Новый чат\n\n"
-                f"Пользователь 1: {cb.from_user.id}"
-                f"{f' (@{cb.from_user.username})' if cb.from_user.username else ''}\n"
-                f"Пользователь 2: {owner_user_id}"
-                f"{f' (@{owner_username})' if owner_username else ''}"
-            ),
-        )
-    except TelegramBadRequest:
-        log.exception("Не удалось создать тему для чата")
-        await cb.answer()
-        await cb.message.answer(
-            "Не удалось создать тему для чата. Проверь, что бот добавлен администратором "
-            "в форум-группу и у него есть право управлять темами."
-        )
-        return
 
+        try:
+            topic = await bot.create_forum_topic(
+                chat_id=forum_chat_id,
+                name=f"💬 {viewer_name} ↔ {owner_name}",
+            )
+            topic_id = topic.message_thread_id
+
+            try:
+                await bot.send_message(
+                    chat_id=forum_chat_id,
+                    message_thread_id=topic_id,
+                    text=(
+                        "🔵 Новый чат\n\n"
+                        f"Пользователь 1: {cb.from_user.id}"
+                        f"{f' (@{cb.from_user.username})' if cb.from_user.username else ''}\n"
+                        f"Пользователь 2: {owner_user_id}"
+                        f"{f' (@{owner_username})' if owner_username else ''}"
+                    ),
+                )
+            except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+                log.exception(
+                    "Тема создана, но не удалось отправить стартовое сообщение: topic_id=%s",
+                    topic_id,
+                )
+        except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+            log.exception("Не удалось создать тему для чата. Чат всё равно будет запущен.")
+
+    # Сам чат запускается независимо от результата создания форум-темы.
     db.start_chat(cb.from_user.id, owner_user_id)
-    db.create_chat_topic(
-        cb.from_user.id,
-        owner_user_id,
-        forum_chat_id,
-        topic_id,
-    )
+
+    # Сохраняем связь с темой только если тема действительно была создана.
+    if forum_chat_id is not None and topic_id is not None:
+        db.create_chat_topic(
+            cb.from_user.id,
+            owner_user_id,
+            forum_chat_id,
+            topic_id,
+        )
     await cb.answer()
 
     # После начала чата убираем кнопки с карточки пользователя,
