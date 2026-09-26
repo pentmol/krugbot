@@ -180,7 +180,6 @@ class DB:
         return row["username"]
 
     def get_active_chat_user(self, user_id: int) -> Optional[int]:
-        self.ensure_user(user_id)
         cur = self.conn.cursor()
         cur.execute("SELECT active_chat_user_id FROM users WHERE user_id=%s;", (user_id,))
         row = cur.fetchone()
@@ -287,14 +286,12 @@ class DB:
         return bool(row and row["has_video"])
 
     def profile_complete(self, user_id: int) -> bool:
-        self.ensure_user(user_id)
         cur = self.conn.cursor()
         cur.execute("SELECT profile_complete FROM users WHERE user_id=%s;", (user_id,))
         row = cur.fetchone()
         return bool(row and row["profile_complete"])
 
     def is_banned(self, user_id: int) -> bool:
-        self.ensure_user(user_id)
         cur = self.conn.cursor()
         cur.execute("SELECT banned FROM users WHERE user_id=%s;", (user_id,))
         row = cur.fetchone()
@@ -344,7 +341,6 @@ class DB:
         self.conn.commit()
 
     def get_profile(self, user_id: int) -> Optional[dict]:
-        self.ensure_user(user_id)
         cur = self.conn.cursor()
         cur.execute(
             "SELECT age, gender, looking_for, about, profile_complete FROM users WHERE user_id=%s;",
@@ -418,7 +414,6 @@ class DB:
         return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
 
     def pick_next_video(self, viewer_user_id: int) -> Optional[Video]:
-        self.ensure_user(viewer_user_id)
         cur = self.conn.cursor()
 
         # First show videos the user has never seen.
@@ -500,7 +495,6 @@ class DB:
         return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
 
     def mark_viewed(self, viewer_user_id: int, video_id: int) -> None:
-        self.ensure_user(viewer_user_id)
         cur = self.conn.cursor()
         cur.execute(
             """
