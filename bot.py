@@ -89,9 +89,9 @@ def kb_ready(user_id: int) -> InlineKeyboardMarkup:
 
 
 def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int) -> InlineKeyboardMarkup:
-    # Только администратор видит кнопку «Заблокировать».
-    # Для остальных пользователей на этом месте показываем «Жалоба».
-    bottom_button = (
+    # Оставляем только одну кнопку жалобы.
+    # Лайков/дизлайков в карточке профиля нет.
+    complaint_or_block = (
         InlineKeyboardButton(text="Заблокировать", callback_data=f"block:{owner_user_id}")
         if viewer_user_id == ADMIN_CHAT_ID
         else InlineKeyboardButton(text="Жалоба", callback_data=f"complaint:{video_id}")
@@ -99,13 +99,9 @@ def kb_video(video_id: int, owner_user_id: int, viewer_user_id: int) -> InlineKe
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Начать чат", callback_data=f"chat_start:{owner_user_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="Следующее", callback_data="next"),
-                bottom_button,
-            ],
+            [InlineKeyboardButton(text="Начать чат", callback_data=f"chat_start:{owner_user_id}")],
+            [InlineKeyboardButton(text="Следующее", callback_data="next")],
+            [complaint_or_block],
         ]
     )
 
@@ -529,29 +525,6 @@ async def cb_block(cb: CallbackQuery, bot: Bot, db: DB) -> None:
         "Кружок заблокирован и больше не будет показываться другим пользователям."
     )
     await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
-
-
-@router.callback_query(F.data.startswith("rate:"))
-async def cb_rate(cb: CallbackQuery, db: DB) -> None:
-    touch_user(db, cb.from_user)
-    if await guard_banned_callback(cb, db):
-        return
-    # rating does not auto-advance; user can press "Следующее" manually
-    try:
-        _, raw_video_id, raw_value = cb.data.split(":", 2)
-        video_id = int(raw_video_id)
-        value = int(raw_value)
-    except Exception:
-        await cb.answer("Не удалось поставить оценку", show_alert=False)
-        return
-
-    try:
-        db.rate(cb.from_user.id, video_id, value)
-    except Exception:
-        await cb.answer("Не удалось поставить оценку", show_alert=False)
-        return
-
-    await cb.answer("Оценка сохранена", show_alert=False)
 
 
 @router.callback_query(F.data.startswith("chat_start:"))
