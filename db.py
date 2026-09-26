@@ -32,8 +32,6 @@ class DB:
         await self._init()
         return self
 
-    async def
-
     async def close(self) -> None:
         await self.conn.close()
 
