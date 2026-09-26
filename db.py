@@ -138,13 +138,37 @@ class DB:
 
     def ensure_user(self, user_id: int, username: Optional[str] = None) -> None:
         cur = self.conn.cursor()
+        if username is None:
+            cur.execute(
+                "INSERT INTO users(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING;",
+                (user_id,),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO users(user_id, username)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET username=EXCLUDED.username;
+                """,
+                (user_id, username),
+            )
+        self.conn.commit()
+
+    def get_user_state(self, user_id: int, username: Optional[str] = None) -> dict:
+        cur = self.conn.cursor()
         cur.execute(
-            "INSERT INTO users(user_id, username) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING;",
+            """
+            INSERT INTO users(user_id, username)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET username=EXCLUDED.username
+            RETURNING user_id, username, banned, banned_notified,
+                      profile_complete, has_video, active_chat_user_id;
+            """,
             (user_id, username),
         )
-        if username is not None:
-            cur.execute("UPDATE users SET username=%s WHERE user_id=%s;", (username, user_id))
+        row = cur.fetchone()
         self.conn.commit()
+        return dict(row)
 
     def get_username(self, user_id: int) -> Optional[str]:
         self.ensure_user(user_id)
