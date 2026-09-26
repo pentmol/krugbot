@@ -463,7 +463,7 @@ class DB:
                 JOIN users u ON u.user_id = v.owner_user_id
                 JOIN views vw ON vw.video_id = v.id AND vw.viewer_user_id = %s
                 WHERE v.owner_user_id != %s
-                  AND u.video_hidden = 0
+                  AND u.video_hidden = FALSE
                 ORDER BY vw.viewed_at ASC
                 LIMIT 1;
                 """,
