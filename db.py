@@ -154,6 +154,23 @@ class DB:
         await conn.commit()
 
 
+    async def _ensure_user_conn(self, conn, user_id: int, username: Optional[str] = None) -> None:
+        cur = conn.cursor()
+        if username is None:
+            await cur.execute(
+                "INSERT INTO users(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING;",
+                (user_id,),
+            )
+        else:
+            await cur.execute(
+                """
+                INSERT INTO users(user_id, username)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET username=EXCLUDED.username;
+                """,
+                (user_id, username),
+            )
+
     async def ensure_user(self, user_id: int, username: Optional[str] = None) -> None:
         async with self.pool.connection() as conn:
             cur = conn.cursor()
@@ -192,7 +209,7 @@ class DB:
 
     async def get_username(self, user_id: int) -> Optional[str]:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("SELECT username FROM users WHERE user_id=%s;", (user_id,))
             row = await cur.fetchone()
