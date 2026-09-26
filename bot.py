@@ -144,21 +144,23 @@ def format_user_ref(user_id: int, username: str | None) -> str:
 
 
 def touch_user(db: DB, tg_user) -> None:
+    # Keep the local request path simple; one UPSERT keeps the user fresh.
     db.ensure_user(tg_user.id, tg_user.username)
 
 
 async def guard_banned_message(message: Message, db: DB) -> bool:
-    user_id = message.from_user.id
-    if not db.is_banned(user_id):
+    user = db.get_user_state(message.from_user.id, message.from_user.username)
+    if not user["banned"]:
         return False
-    if not db.banned_notified(user_id):
+    if not user["banned_notified"]:
         await message.answer("Ты забанен(а) и не можешь пользоваться ботом.")
-        db.set_banned_notified(user_id)
+        db.set_banned_notified(message.from_user.id)
     return True
 
 
 async def guard_banned_callback(cb: CallbackQuery, db: DB) -> bool:
-    if not db.is_banned(cb.from_user.id):
+    user = db.get_user_state(cb.from_user.id, cb.from_user.username)
+    if not user["banned"]:
         return False
     # Must answer callback to stop the loading spinner, but don't spam messages.
     await cb.answer()
