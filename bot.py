@@ -45,7 +45,7 @@ def main_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🔍 Искать")],
-            [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="⭕️ Мой кружок")],
+            [KeyboardButton(text="⭕️ Мой кружок")],
             [KeyboardButton(text="🚫 Завершить чат")],
         ],
         resize_keyboard=True,
