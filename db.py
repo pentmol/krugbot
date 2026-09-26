@@ -437,6 +437,20 @@ class DB:
         await self.conn.commit()
         return owner_user_id
 
+    async def get_video_info(self, video_id: int) -> Optional[dict]:
+        cur = self.conn.cursor()
+        await cur.execute(
+            "SELECT owner_user_id, file_id FROM videos WHERE id=%s;",
+            (video_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "owner_user_id": int(row["owner_user_id"]),
+            "file_id": str(row["file_id"]),
+        }
+
     async def get_user_video(self, owner_user_id: int) -> Optional[Video]:
         await self.ensure_user(owner_user_id)
         cur = self.conn.cursor()
