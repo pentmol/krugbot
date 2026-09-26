@@ -228,8 +228,8 @@ class DB:
 
     async def start_chat(self, user_id: int, partner_user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
-            await self.ensure_user(partner_user_id)
+            await self._ensure_user_conn(conn, user_id)
+            await self._ensure_user_conn(conn, partner_user_id)
             cur = conn.cursor()
             await cur.execute("UPDATE users SET active_chat_user_id=%s WHERE user_id=%s;", (partner_user_id, user_id))
             await cur.execute("UPDATE users SET active_chat_user_id=%s WHERE user_id=%s;", (user_id, partner_user_id))
@@ -313,7 +313,7 @@ class DB:
 
     async def end_chat(self, user_id: int) -> Optional[int]:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             partner_user_id = await self.get_active_chat_user(user_id)
             cur = conn.cursor()
             await cur.execute("UPDATE users SET active_chat_user_id=NULL WHERE user_id=%s;", (user_id,))
@@ -374,14 +374,14 @@ class DB:
 
     async def ban_user(self, user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("UPDATE users SET banned=TRUE, banned_notified=FALSE WHERE user_id=%s;", (user_id,))
             await conn.commit()
 
     async def banned_notified(self, user_id: int) -> bool:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("SELECT banned_notified FROM users WHERE user_id=%s;", (user_id,))
             row = await cur.fetchone()
@@ -389,7 +389,7 @@ class DB:
 
     async def set_banned_notified(self, user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("UPDATE users SET banned_notified=TRUE WHERE user_id=%s;", (user_id,))
             await conn.commit()
@@ -403,7 +403,7 @@ class DB:
             looking_for: str,
             about: str,
         ) -> None:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute(
                 """
@@ -439,7 +439,7 @@ class DB:
 
     async def set_user_video(self, user_id: int, file_id: str) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             # Keep one current video per owner.
             await cur.execute("DELETE FROM videos WHERE owner_user_id=%s;", (user_id,))
@@ -452,7 +452,7 @@ class DB:
 
     async def clear_user_video(self, owner_user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(owner_user_id)
+            await self._ensure_user_conn(conn, owner_user_id)
             cur = conn.cursor()
             await cur.execute("DELETE FROM videos WHERE owner_user_id=%s;", (owner_user_id,))
             await cur.execute("UPDATE users SET has_video=FALSE WHERE user_id=%s;", (owner_user_id,))
@@ -460,7 +460,7 @@ class DB:
 
     async def hide_user_videos(self, owner_user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(owner_user_id)
+            await self._ensure_user_conn(conn, owner_user_id)
             cur = conn.cursor()
             await cur.execute("DELETE FROM videos WHERE owner_user_id=%s;", (owner_user_id,))
             await cur.execute(
@@ -502,7 +502,7 @@ class DB:
 
     async def get_user_video(self, owner_user_id: int) -> Optional[Video]:
         async with self.pool.connection() as conn:
-            await self.ensure_user(owner_user_id)
+            await self._ensure_user_conn(conn, owner_user_id)
             cur = conn.cursor()
             await cur.execute(
                 "SELECT id, owner_user_id, file_id FROM videos WHERE owner_user_id=%s;",
@@ -611,7 +611,7 @@ class DB:
 
     async def add_complaint(self, reporter_user_id: int, video_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(reporter_user_id)
+            await self._ensure_user_conn(conn, reporter_user_id)
             cur = conn.cursor()
             await cur.execute(
                 "INSERT INTO complaints(reporter_user_id, video_id) VALUES (%s, %s);",
@@ -623,7 +623,7 @@ class DB:
         async with self.pool.connection() as conn:
             if value not in (1, -1):
                 raise ValueError("rating value must be 1 or -1")
-            await self.ensure_user(rater_user_id)
+            await self._ensure_user_conn(conn, rater_user_id)
             cur = conn.cursor()
             await cur.execute(
                 """
@@ -673,7 +673,7 @@ class DB:
 
     async def mark_partner_verified(self, user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute(
                 """
@@ -687,21 +687,21 @@ class DB:
 
     async def is_partner_verified(self, user_id: int) -> bool:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("SELECT 1 FROM partner_verifications WHERE user_id=%s LIMIT 1;", (user_id,))
             return await cur.fetchone() is not None
 
     async def set_partner_check_attempted(self, user_id: int) -> None:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("UPDATE users SET partner_check_attempted=TRUE WHERE user_id=%s;", (user_id,))
             await conn.commit()
 
     async def partner_check_attempted(self, user_id: int) -> bool:
         async with self.pool.connection() as conn:
-            await self.ensure_user(user_id)
+            await self._ensure_user_conn(conn, user_id)
             cur = conn.cursor()
             await cur.execute("SELECT partner_check_attempted FROM users WHERE user_id=%s;", (user_id,))
             row = await cur.fetchone()
