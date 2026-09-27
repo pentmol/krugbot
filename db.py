@@ -513,7 +513,10 @@ class DB:
             await self._ensure_user_conn(conn, owner_user_id)
             cur = conn.cursor()
             await cur.execute(
-                "SELECT id, owner_user_id, file_id FROM videos WHERE owner_user_id=%s;",
+                "SELECT v.id, v.owner_user_id, v.file_id, u.age, u.gender, u.looking_for, u.about
+                 FROM videos v
+                 JOIN users u ON u.user_id = v.owner_user_id
+                 WHERE v.owner_user_id=%s;",
                 (owner_user_id,),
             )
             row = await cur.fetchone()
@@ -550,7 +553,7 @@ class DB:
                           AND vw.video_id = v.id
                       )
                 )
-                SELECT id, owner_user_id, file_id
+                SELECT id, owner_user_id, file_id, age, gender, looking_for, about
                 FROM candidates
                 OFFSET (
                     SELECT CASE
@@ -579,7 +582,8 @@ class DB:
             # Do not repeat anyone from the last 5 viewed profiles when possible.
             await cur.execute(
                 """
-                SELECT v.id, v.owner_user_id, v.file_id
+                SELECT v.id, v.owner_user_id, v.file_id,
+                       u.age, u.gender, u.looking_for, u.about
                 FROM videos v
                 JOIN users u ON u.user_id = v.owner_user_id
                 WHERE v.owner_user_id != %s
@@ -613,7 +617,8 @@ class DB:
             if not row:
                 await cur.execute(
                     """
-                    SELECT v.id, v.owner_user_id, v.file_id
+                    SELECT v.id, v.owner_user_id, v.file_id,
+                           u.age, u.gender, u.looking_for, u.about
                     FROM videos v
                     JOIN users u ON u.user_id = v.owner_user_id
                     JOIN views vw ON vw.video_id = v.id AND vw.viewer_user_id = %s
@@ -628,7 +633,15 @@ class DB:
 
             if not row:
                 return None
-            return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
+            return Video(
+                id=row["id"],
+                owner_user_id=row["owner_user_id"],
+                file_id=row["file_id"],
+                age=row["age"],
+                gender=row["gender"],
+                looking_for=row["looking_for"],
+                about=row["about"],
+            )
 
     async def mark_viewed(self, viewer_user_id: int, video_id: int) -> None:
         async with self.pool.connection() as conn:
