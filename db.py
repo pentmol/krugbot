@@ -151,6 +151,10 @@ class DB:
             """
         )
 
+        # Indexes used by the hot paths (safe to run repeatedly).
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_video ON views(viewer_user_id, video_id);")
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_viewed_at ON views(viewer_user_id, viewed_at DESC);")
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_topics_active_users ON chat_topics(active, user1_id, user2_id);")
         await conn.commit()
 
 
@@ -520,18 +524,28 @@ class DB:
             # First show videos the user has never seen.
             await cur.execute(
                 """
-                SELECT v.id, v.owner_user_id, v.file_id
-                FROM videos v
-                JOIN users u ON u.user_id = v.owner_user_id
-                WHERE v.owner_user_id != %s
-                  AND u.video_hidden = FALSE
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM views vw
-                    WHERE vw.viewer_user_id = %s
-                      AND vw.video_id = v.id
-                  )
-                ORDER BY RANDOM()
+                WITH candidates AS (
+                    SELECT v.id, v.owner_user_id, v.file_id
+                    FROM videos v
+                    JOIN users u ON u.user_id = v.owner_user_id
+                    WHERE v.owner_user_id != %s
+                      AND u.video_hidden = FALSE
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM views vw
+                        WHERE vw.viewer_user_id = %s
+                          AND vw.video_id = v.id
+                      )
+                )
+                SELECT id, owner_user_id, file_id
+                FROM candidates
+                OFFSET (
+                    SELECT CASE
+                        WHEN COUNT(*) = 0 THEN 0
+                        ELSE floor(random() * COUNT(*))
+                    END
+                    FROM candidates
+                )
                 LIMIT 1;
                 """,
                 (viewer_user_id, viewer_user_id),
