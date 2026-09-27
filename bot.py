@@ -143,8 +143,15 @@ def format_user_ref(user_id: int, username: str | None) -> str:
     return str(user_id)
 
 
+_touched_users: dict[int, str | None] = {}
+
 async def touch_user(db: DB, tg_user) -> None:
-    await db.ensure_user(tg_user.id, tg_user.username)
+    # Avoid a Supabase write on every Telegram update.
+    # Refresh the DB only on first contact or when the username changes.
+    current_username = tg_user.username
+    if _touched_users.get(tg_user.id, object()) != current_username:
+        await db.ensure_user(tg_user.id, current_username)
+        _touched_users[tg_user.id] = current_username
 
 
 async def guard_banned_message(message: Message, db: DB) -> bool:
@@ -391,7 +398,13 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
                 chat_id,
                 video.file_id,
             )
-            profile = await db.get_profile(video.owner_user_id)
+            profile = {
+                "age": video.age,
+                "gender": video.gender,
+                "looking_for": video.looking_for,
+                "about": video.about,
+                "profile_complete": True,
+            }
             await bot.send_message(
                 chat_id,
                 format_profile_card(profile),
