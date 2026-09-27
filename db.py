@@ -513,10 +513,13 @@ class DB:
             await self._ensure_user_conn(conn, owner_user_id)
             cur = conn.cursor()
             await cur.execute(
-                "SELECT v.id, v.owner_user_id, v.file_id, u.age, u.gender, u.looking_for, u.about
-                 FROM videos v
-                 JOIN users u ON u.user_id = v.owner_user_id
-                 WHERE v.owner_user_id=%s;",
+                """
+                SELECT v.id, v.owner_user_id, v.file_id,
+                       u.age, u.gender, u.looking_for, u.about
+                FROM videos v
+                JOIN users u ON u.user_id = v.owner_user_id
+                WHERE v.owner_user_id=%s;
+                """,
                 (owner_user_id,),
             )
             row = await cur.fetchone()
