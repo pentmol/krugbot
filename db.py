@@ -12,6 +12,10 @@ class Video:
     id: int
     owner_user_id: int
     file_id: str
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    looking_for: Optional[str] = None
+    about: Optional[str] = None
 
 
 class DB:
@@ -515,7 +519,15 @@ class DB:
             row = await cur.fetchone()
             if not row:
                 return None
-            return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
+            return Video(
+                    id=row["id"],
+                    owner_user_id=row["owner_user_id"],
+                    file_id=row["file_id"],
+                    age=row["age"],
+                    gender=row["gender"],
+                    looking_for=row["looking_for"],
+                    about=row["about"],
+                )
 
     async def pick_next_video(self, viewer_user_id: int) -> Optional[Video]:
         async with self.pool.connection() as conn:
@@ -525,7 +537,8 @@ class DB:
             await cur.execute(
                 """
                 WITH candidates AS (
-                    SELECT v.id, v.owner_user_id, v.file_id
+                    SELECT v.id, v.owner_user_id, v.file_id,
+                           u.age, u.gender, u.looking_for, u.about
                     FROM videos v
                     JOIN users u ON u.user_id = v.owner_user_id
                     WHERE v.owner_user_id != %s
@@ -552,7 +565,15 @@ class DB:
             )
             row = await cur.fetchone()
             if row:
-                return Video(id=row["id"], owner_user_id=row["owner_user_id"], file_id=row["file_id"])
+                return Video(
+                    id=row["id"],
+                    owner_user_id=row["owner_user_id"],
+                    file_id=row["file_id"],
+                    age=row["age"],
+                    gender=row["gender"],
+                    looking_for=row["looking_for"],
+                    about=row["about"],
+                )
 
             # If everyone has already been seen, start showing them again.
             # Do not repeat anyone from the last 5 viewed profiles when possible.
