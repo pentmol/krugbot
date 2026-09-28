@@ -408,6 +408,27 @@ async def got_video_note(message: Message, db: DB, state: FSMContext) -> None:
     )
 
 
+
+
+async def send_sponsor_gate(bot: Bot, chat_id: int) -> None:
+    await bot.send_message(
+        chat_id,
+        "Чтобы смотреть дальше, запусти нашего спонсора 👇",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🔥 Запустить Streakgram",
+                    url="https://t.me/streakgrambot?start=krugbot",
+                )],
+                [InlineKeyboardButton(
+                    text="✅ Проверить подписку",
+                    callback_data="sponsor_check",
+                )],
+            ]
+        ),
+    )
+
+
 async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -> None:
     # All prerequisites come from one Supabase query instead of four.
     state = await db.get_search_state(viewer_user_id)
@@ -428,6 +449,12 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             "Чтобы смотреть чужие кружки, сначала отправь свой кружок.",
         )
         return
+
+    if state["sponsor_views_since_gate"] >= 3:
+        if not await db.is_sponsor_gate_completed(viewer_user_id):
+            await send_sponsor_gate(bot, chat_id)
+            return
+        await db.reset_sponsor_gate(viewer_user_id)
 
     # File IDs are bot-specific; if DB has stale IDs (e.g. token changed),
     # Telegram returns "wrong file identifier". In that case we drop the record
@@ -490,6 +517,29 @@ async def cb_referral(cb: CallbackQuery, db: DB) -> None:
         "Делись этой ссылкой и получи +20 показов твоего кружка за каждый кружок твоих друзей.\n"
         f"Твоя ссылка: https://t.me/Anonymcircle_bot?start=ref_{user_id}"
     )
+
+
+
+
+@router.callback_query(F.data == "sponsor_check")
+async def cb_sponsor_check(cb: CallbackQuery, db: DB) -> None:
+    await touch_user(db, cb.from_user)
+    if await guard_banned_callback(cb, db):
+        return
+
+    if await db.is_sponsor_gate_completed(cb.from_user.id):
+        await db.reset_sponsor_gate(cb.from_user.id)
+        await cb.answer("Готово! Доступ открыт.", show_alert=True)
+        await cb.message.answer(
+            "✅ Проверка пройдена. Можешь продолжать смотреть кружки.",
+            reply_markup=kb_watch(),
+        )
+    else:
+        await cb.answer(
+            "Пока не вижу запуск Streakgram. Нажми «Запустить Streakgram», "
+            "затем вернись и проверь ещё раз.",
+            show_alert=True,
+        )
 
 
 @router.callback_query(F.data == "next")
