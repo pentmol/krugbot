@@ -207,7 +207,7 @@ async def continue_after_start_gate(message: Message, db: DB, state: FSMContext)
 
 
 @router.my_chat_member()
-async def bot_chat_member_updated(event: ChatMemberUpdated, db: DB) -> None:
+async def bot_chat_member_updated(event: ChatMemberUpdated, bot: Bot, db: DB) -> None:
     # In a private chat, "kicked" means the user blocked the bot.
     if event.chat.type != "private":
         return
@@ -217,7 +217,28 @@ async def bot_chat_member_updated(event: ChatMemberUpdated, db: DB) -> None:
 
     if status == "kicked":
         await db.clear_user_video(user_id)
-        await db.end_chat(user_id)
+        partner_user_id = await db.end_chat(user_id)
+
+        topic = await db.close_chat_topic(user_id)
+        if topic:
+            try:
+                await bot.close_forum_topic(
+                    chat_id=topic["group_chat_id"],
+                    message_thread_id=topic["topic_id"],
+                )
+            except TelegramBadRequest:
+                log.exception("Не удалось закрыть тему после блокировки: topic_id=%s", topic["topic_id"])
+
+        if partner_user_id is not None:
+            try:
+                await bot.send_message(
+                    partner_user_id,
+                    "Собеседник покинул чат. Можешь снова искать кружки.",
+                    reply_markup=main_kb(),
+                )
+            except TelegramBadRequest:
+                pass
+
         log.info("User %s blocked the bot; removed their video from the feed.", user_id)
 
 
