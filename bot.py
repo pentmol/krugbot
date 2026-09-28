@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
@@ -151,15 +152,20 @@ def format_user_ref(user_id: int, username: str | None) -> str:
     return str(user_id)
 
 
-_touched_users: dict[int, str | None] = {}
+_touched_users: dict[int, tuple[str | None, float]] = {}
 
 async def touch_user(db: DB, tg_user) -> None:
-    # Avoid a Supabase write on every Telegram update.
-    # Refresh the DB only on first contact or when the username changes.
+    # Mark real bot usage, but throttle DB writes to once per 30 seconds per user.
     current_username = tg_user.username
-    if _touched_users.get(tg_user.id, object()) != current_username:
+    now = time.monotonic()
+    cached = _touched_users.get(tg_user.id)
+    if cached is None or cached[0] != current_username:
         await db.ensure_user(tg_user.id, current_username)
-        _touched_users[tg_user.id] = current_username
+        await db.touch_user_activity(tg_user.id)
+        _touched_users[tg_user.id] = (current_username, now)
+    elif now - cached[1] >= 30:
+        await db.touch_user_activity(tg_user.id)
+        _touched_users[tg_user.id] = (current_username, now)
 
 
 async def guard_banned_message(message: Message, db: DB) -> bool:
@@ -977,7 +983,6 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
 
     if delivered:
         await db.mark_chat_activity(message.from_user.id)
-        await db.mark_chat_activity(partner_user_id)
 
     # Копируем каждое сообщение в отдельную тему админской форум-группы:
     # текст, фото, видео, кружки, документы, стикеры и другие поддерживаемые
