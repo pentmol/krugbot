@@ -856,15 +856,12 @@ class DB:
             )
             return await cur.fetchone() is not None
 
-    async def reset_sponsor_gate(self, user_id: int) -> None:
+    async def reset_sponsor_views_counter(self, user_id: int) -> None:
+        """Reset the 3-view counter without revoking one-time sponsor access."""
         async with self.pool.connection() as conn:
             cur = conn.cursor()
             await cur.execute(
                 "UPDATE users SET sponsor_views_since_gate=0 WHERE user_id=%s;",
-                (user_id,),
-            )
-            await cur.execute(
-                "DELETE FROM krugbot_sponsor_completions WHERE user_id=%s;",
                 (user_id,),
             )
             await conn.commit()
