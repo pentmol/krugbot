@@ -421,7 +421,7 @@ async def send_sponsor_gate(bot: Bot, chat_id: int) -> None:
                     url="https://t.me/streakgrambot?start=krugbot",
                 )],
                 [InlineKeyboardButton(
-                    text="✅ Проверить подписку",
+                    text="✅ Проверить запуск",
                     callback_data="sponsor_check",
                 )],
             ]
@@ -528,7 +528,7 @@ async def cb_sponsor_check(cb: CallbackQuery, db: DB) -> None:
         return
 
     if await db.is_sponsor_gate_completed(cb.from_user.id):
-        await db.reset_sponsor_gate(cb.from_user.id)
+        await db.reset_sponsor_views_counter(cb.from_user.id)
         await cb.answer("Готово! Доступ открыт.", show_alert=True)
         await cb.message.answer(
             "✅ Проверка пройдена. Можешь продолжать смотреть кружки.",
