@@ -557,7 +557,7 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
 
     if current_partner == owner_user_id:
         await cb.answer()
-        await cb.message.answer("Ты уже в чате с этим пользователем. Для завершения используй кнопку «🚫 Завершить чат».")
+        await cb.message.answer("Ты уже в чате с этим пользователем. Для завершения используй кнопку «🚫 Завершить разговор».")
         return
 
     owner_partner = await db.get_active_chat_user(owner_user_id)
