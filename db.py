@@ -619,7 +619,9 @@ class DB:
         async with self.pool.connection() as conn:
             cur = conn.cursor()
 
-            # First show videos the user has never seen.
+            # First show every profile the viewer has never seen.
+            # This guarantees that new/unseen users are exhausted before
+            # the feed starts a new cycle.
             await cur.execute(
                 """
                 SELECT v.id, v.owner_user_id, v.file_id,
@@ -640,53 +642,16 @@ class DB:
                     END,
                     u.last_active_at DESC NULLS LAST,
                     v.created_at DESC
-                LIMIT 1;                """,
-                (viewer_user_id, viewer_user_id),
-            )
-            row = await cur.fetchone()
-            if row:
-                return Video(
-                    id=row["id"],
-                    owner_user_id=row["owner_user_id"],
-                    file_id=row["file_id"],
-                    age=row["age"],
-                    gender=row["gender"],
-                    looking_for=row["looking_for"],
-                    about=row["about"],
-                )
-
-            # If everyone has already been seen, start showing them again.
-            # Do not repeat anyone from the last 5 viewed profiles when possible.
-            await cur.execute(
-                """
-                SELECT v.id, v.owner_user_id, v.file_id,
-                       u.age, u.gender, u.looking_for, u.about
-                FROM videos v
-                JOIN users u ON u.user_id = v.owner_user_id
-                WHERE v.owner_user_id != %s
-                  AND u.video_hidden = FALSE
-                  AND v.owner_user_id NOT IN (
-                    SELECT v2.owner_user_id
-                    FROM views vw2
-                    JOIN videos v2 ON v2.id = vw2.video_id
-                    WHERE vw2.viewer_user_id = %s
-                    ORDER BY vw2.viewed_at DESC
-                    LIMIT 5
-                  )
-                ORDER BY
-                    CASE WHEN u.active_chat_user_id IS NOT NULL THEN 2
-                         WHEN u.last_active_at >= NOW() - INTERVAL '15 minutes' THEN 0
-                         ELSE 1 END,
-                    u.last_active_at DESC NULLS LAST,
-                    v.created_at DESC
                 LIMIT 1;
                 """,
                 (viewer_user_id, viewer_user_id),
             )
             row = await cur.fetchone()
 
-            # With fewer than 6 available profiles, a strict 5-profile cooldown
-            # can leave no candidate. In that case, use the oldest viewed profile.
+            # If all available profiles have already been seen, start a new
+            # cycle from the profile viewed longest ago. The previous version
+            # sorted this fallback by activity first, which could repeatedly
+            # return the same highly-active profile.
             if not row:
                 await cur.execute(
                     """
@@ -699,11 +664,13 @@ class DB:
                       AND v.owner_user_id != %s
                       AND u.video_hidden = FALSE
                     ORDER BY
-                        CASE WHEN u.active_chat_user_id IS NOT NULL THEN 2
-                             WHEN u.last_active_at >= NOW() - INTERVAL '15 minutes' THEN 0
-                             ELSE 1 END,
-                        u.last_active_at DESC NULLS LAST,
-                        vw.viewed_at ASC
+                        vw.viewed_at ASC,
+                        CASE
+                            WHEN u.active_chat_user_id IS NOT NULL THEN 2
+                            WHEN u.last_active_at >= NOW() - INTERVAL '15 minutes' THEN 0
+                            ELSE 1
+                        END,
+                        u.last_active_at DESC NULLS LAST
                     LIMIT 1;
                     """,
                     (viewer_user_id, viewer_user_id),
@@ -712,6 +679,7 @@ class DB:
 
             if not row:
                 return None
+
             return Video(
                 id=row["id"],
                 owner_user_id=row["owner_user_id"],
