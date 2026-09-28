@@ -829,6 +829,19 @@ class DB:
             )
             return await cur.fetchone() is not None
 
+    async def record_sponsor_completion(self, user_id: int) -> None:
+        async with self.pool.connection() as conn:
+            cur = conn.cursor()
+            await cur.execute(
+                """
+                INSERT INTO krugbot_sponsor_completions (user_id, completed_at)
+                VALUES (%s, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) DO UPDATE SET completed_at=CURRENT_TIMESTAMP;
+                """,
+                (user_id,),
+            )
+            await conn.commit()
+
     async def reset_sponsor_views_counter(self, user_id: int) -> None:
         """Reset the 3-view counter without revoking one-time sponsor access."""
         async with self.pool.connection() as conn:
