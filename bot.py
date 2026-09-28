@@ -12,6 +12,7 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from aiogram.types import BotCommand, BotCommandScopeDefault
 from aiogram.types import (
     CallbackQuery,
+    ChatMemberUpdated,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -203,6 +204,21 @@ async def continue_after_start_gate(message: Message, db: DB, state: FSMContext)
         "Профиль готов. Для начала поиска отправь свой кружок (video note).",
         reply_markup=main_kb(),
     )
+
+
+@router.my_chat_member()
+async def bot_chat_member_updated(event: ChatMemberUpdated, db: DB) -> None:
+    # In a private chat, "kicked" means the user blocked the bot.
+    if event.chat.type != "private":
+        return
+
+    user_id = event.from_user.id
+    status = event.new_chat_member.status
+
+    if status == "kicked":
+        await db.clear_user_video(user_id)
+        await db.end_chat(user_id)
+        log.info("User %s blocked the bot; removed their video from the feed.", user_id)
 
 
 @router.message(CommandStart())
