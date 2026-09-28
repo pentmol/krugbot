@@ -78,6 +78,9 @@ class DB:
         await cur.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_chat_activity_at TIMESTAMPTZ;"
         )
+        await cur.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS sponsor_views_since_gate INTEGER NOT NULL DEFAULT 0;"
+        )
 
         await cur.execute(
             """
@@ -151,6 +154,15 @@ class DB:
               topic_id BIGINT NOT NULL,
               created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               active BOOLEAN NOT NULL DEFAULT TRUE
+            );
+            """
+        )
+
+        await cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS krugbot_sponsor_completions (
+              user_id BIGINT PRIMARY KEY,
+              completed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
@@ -386,7 +398,7 @@ class DB:
             cur = conn.cursor()
             await cur.execute(
                 """
-                SELECT banned, active_chat_user_id, profile_complete, has_video
+                SELECT banned, active_chat_user_id, profile_complete, has_video, sponsor_views_since_gate
                 FROM users
                 WHERE user_id=%s;
                 """,
@@ -399,12 +411,14 @@ class DB:
                     "active_chat_user_id": None,
                     "profile_complete": False,
                     "has_video": False,
+                    "sponsor_views_since_gate": 0,
                 }
             return {
                 "banned": bool(row["banned"]),
                 "active_chat_user_id": row["active_chat_user_id"],
                 "profile_complete": bool(row["profile_complete"]),
                 "has_video": bool(row["has_video"]),
+                "sponsor_views_since_gate": int(row["sponsor_views_since_gate"] or 0),
             }
 
     async def user_has_video(self, user_id: int) -> bool:
@@ -708,8 +722,11 @@ class DB:
                 VALUES (%s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(viewer_user_id, video_id) DO UPDATE SET
                   viewed_at=CURRENT_TIMESTAMP;
+                UPDATE users
+                SET sponsor_views_since_gate = sponsor_views_since_gate + 1
+                WHERE user_id=%s;
                 """,
-                (viewer_user_id, video_id),
+                (viewer_user_id, video_id, viewer_user_id),
             )
             await conn.commit()
 
@@ -810,3 +827,26 @@ class DB:
             await cur.execute("SELECT partner_check_attempted FROM users WHERE user_id=%s;", (user_id,))
             row = await cur.fetchone()
             return bool(row and row["partner_check_attempted"])
+
+
+    async def is_sponsor_gate_completed(self, user_id: int) -> bool:
+        async with self.pool.connection() as conn:
+            cur = conn.cursor()
+            await cur.execute(
+                "SELECT 1 FROM krugbot_sponsor_completions WHERE user_id=%s LIMIT 1;",
+                (user_id,),
+            )
+            return await cur.fetchone() is not None
+
+    async def reset_sponsor_gate(self, user_id: int) -> None:
+        async with self.pool.connection() as conn:
+            cur = conn.cursor()
+            await cur.execute(
+                "UPDATE users SET sponsor_views_since_gate=0 WHERE user_id=%s;",
+                (user_id,),
+            )
+            await cur.execute(
+                "DELETE FROM krugbot_sponsor_completions WHERE user_id=%s;",
+                (user_id,),
+            )
+            await conn.commit()
