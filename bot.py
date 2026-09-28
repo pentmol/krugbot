@@ -160,8 +160,8 @@ async def touch_user(db: DB, tg_user) -> None:
     now = time.monotonic()
     cached = _touched_users.get(tg_user.id)
     if cached is None or cached[0] != current_username:
-        await db.ensure_user(tg_user.id, current_username)
-        await db.touch_user_activity(tg_user.id)
+        # One DB transaction instead of two sequential connections.
+        await db.ensure_user_activity(tg_user.id, current_username)
         _touched_users[tg_user.id] = (current_username, now)
     elif now - cached[1] >= 30:
         await db.touch_user_activity(tg_user.id)
