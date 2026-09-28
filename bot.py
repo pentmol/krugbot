@@ -46,9 +46,16 @@ def main_kb() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="🔍 Искать")],
             [KeyboardButton(text="⭕️ Мой кружок")],
-            [KeyboardButton(text="🚫 Завершить чат")],
         ],
         resize_keyboard=True,
+    )
+
+
+def kb_active_chat() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚫 Завершить разговор", callback_data="chat_stop")]
+        ]
     )
 
 def kb_gender_inline(kind: str) -> InlineKeyboardMarkup:
@@ -366,7 +373,7 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
     if state["active_chat_user_id"] is not None:
         await bot.send_message(
             chat_id,
-            "Сейчас ты находишься в чате. Заверши его кнопкой «🚫 Завершить чат», чтобы снова искать кружки.",
+            "Сейчас ты находишься в чате. Заверши его кнопкой «🚫 Завершить разговор», чтобы снова искать кружки.",
         )
         return
     if not state["profile_complete"]:
@@ -544,7 +551,7 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     if current_partner is not None and current_partner != owner_user_id:
         await cb.answer()
         await cb.message.answer(
-            "Сейчас ты уже находишься в чате. Сначала заверши его кнопкой «🚫 Завершить чат», чтобы начать новый."
+            "Сейчас ты уже находишься в чате. Сначала заверши его кнопкой «🚫 Завершить разговор», чтобы начать новый."
         )
         return
 
@@ -617,11 +624,15 @@ async def cb_chat_start(cb: CallbackQuery, bot: Bot, db: DB) -> None:
     except TelegramBadRequest:
         pass
 
-    await cb.message.answer("Собеседник подключён.", reply_markup=main_kb())
+    await cb.message.answer(
+        "💬 Разговор начался. Теперь вы можете общаться.",
+        reply_markup=kb_active_chat(),
+    )
     try:
         await bot.send_message(
             owner_user_id,
-            "С тобой начали чат. Теперь вы в чате. Чтобы закончить чат, используй /stopchat.",
+            "💬 Разговор начался. Теперь вы можете общаться.",
+            reply_markup=kb_active_chat(),
         )
     except TelegramBadRequest:
         pass
@@ -740,18 +751,12 @@ async def cmd_setforum(message: Message, db: DB) -> None:
     )
 
 
-@router.message(F.text == "/stopchat")
-async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
-    await touch_user(db, message.from_user)
-    if await guard_banned_message(message, db):
-        return
-
-    partner_user_id = await db.end_chat(message.from_user.id)
+async def stop_chat_for_user(user_id: int, bot: Bot, db: DB) -> int | None:
+    partner_user_id = await db.end_chat(user_id)
     if partner_user_id is None:
-        await message.answer("Сейчас у тебя нет активного чата.")
-        return
+        return None
 
-    topic = await db.close_chat_topic(message.from_user.id)
+    topic = await db.close_chat_topic(user_id)
     if topic:
         try:
             await bot.close_forum_topic(
@@ -761,15 +766,53 @@ async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
         except TelegramBadRequest:
             log.exception("Не удалось закрыть тему чата: topic_id=%s", topic["topic_id"])
 
-    await message.answer("Чат завершён.", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🔍 Искать")],
-            [KeyboardButton(text="⭕️ Мой кружок")],
-        ],
-        resize_keyboard=True,
-    ))
+    return partner_user_id
+
+
+@router.message(F.text == "/stopchat")
+async def cmd_stopchat(message: Message, bot: Bot, db: DB) -> None:
+    await touch_user(db, message.from_user)
+    if await guard_banned_message(message, db):
+        return
+
+    partner_user_id = await stop_chat_for_user(message.from_user.id, bot, db)
+    if partner_user_id is None:
+        await message.answer("Сейчас у тебя нет активного чата.", reply_markup=main_kb())
+        return
+
+    await message.answer("Чат завершён.", reply_markup=main_kb())
     try:
-        await bot.send_message(partner_user_id, "Собеседник завершил чат.")
+        await bot.send_message(partner_user_id, "Собеседник завершил чат.", reply_markup=main_kb())
+    except TelegramBadRequest:
+        pass
+
+
+@router.callback_query(F.data == "chat_stop")
+async def cb_chat_stop(cb: CallbackQuery, bot: Bot, db: DB) -> None:
+    await touch_user(db, cb.from_user)
+    if await guard_banned_callback(cb, db):
+        return
+
+    partner_user_id = await stop_chat_for_user(cb.from_user.id, bot, db)
+    await cb.answer()
+
+    if partner_user_id is None:
+        await cb.message.answer("Сейчас у тебя нет активного чата.", reply_markup=main_kb())
+        return
+
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+
+    await cb.message.answer("Чат завершён.", reply_markup=main_kb())
+
+    try:
+        await bot.send_message(
+            partner_user_id,
+            "Собеседник завершил чат.",
+            reply_markup=main_kb(),
+        )
     except TelegramBadRequest:
         pass
 
@@ -839,10 +882,6 @@ async def cb_edit_profile(cb: CallbackQuery, db: DB, state: FSMContext) -> None:
         reply_markup=main_kb(),
     )
 
-
-@router.message(F.text == "🚫 Завершить чат")
-async def btn_stopchat(message: Message, bot: Bot, db: DB) -> None:
-    await cmd_stopchat(message, bot, db)
 
 
 @router.message(F.text == "🔍 Искать")
