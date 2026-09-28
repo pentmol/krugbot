@@ -452,10 +452,10 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
 
     # Спонсор-бот проверяется только один раз.
     # После успешного запуска Streakgram доступ к ленте остаётся открытым.
-    if state["sponsor_views_since_gate"] >= 3:
-        if not await db.is_sponsor_gate_completed(viewer_user_id):
-            await send_sponsor_gate(bot, chat_id)
-            return
+    # Статус уже получен в get_search_state(), отдельного запроса к БД здесь нет.
+    if state["sponsor_views_since_gate"] >= 3 and not state["sponsor_gate_completed"]:
+        await send_sponsor_gate(bot, chat_id)
+        return
 
     # File IDs are bot-specific; if DB has stale IDs (e.g. token changed),
     # Telegram returns "wrong file identifier". In that case we drop the record
@@ -500,9 +500,8 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
 
 @router.callback_query(F.data == "watch")
 async def cb_watch(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    await touch_user(db, cb.from_user)
-    if await guard_banned_callback(cb, db):
-        return
+    # Сразу подтверждаем нажатие. Проверка бана и активности пользователя
+    # выполняются внутри одного get_search_state() в send_next_video().
     await cb.answer()
     await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
 
@@ -545,9 +544,8 @@ async def cb_sponsor_check(cb: CallbackQuery, db: DB) -> None:
 
 @router.callback_query(F.data == "next")
 async def cb_next(cb: CallbackQuery, bot: Bot, db: DB) -> None:
-    await touch_user(db, cb.from_user)
-    if await guard_banned_callback(cb, db):
-        return
+    # Сразу подтверждаем нажатие. Проверка бана и активности пользователя
+    # выполняются внутри одного get_search_state() в send_next_video().
     await cb.answer()
     await send_next_video(bot, cb.message.chat.id, cb.from_user.id, db)
 
