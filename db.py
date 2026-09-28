@@ -33,8 +33,9 @@ class DB:
             raise RuntimeError("Set DATABASE_URL environment variable")
         self.pool = AsyncConnectionPool(
             conninfo=self.database_url,
-            min_size=1,
-            max_size=10,
+            # Keep warm connections for faster responses.
+            min_size=2,
+            max_size=20,
             kwargs={"row_factory": dict_row},
             open=False,
         )
@@ -167,8 +168,9 @@ class DB:
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_video ON views(viewer_user_id, video_id);")
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_viewed_at ON views(viewer_user_id, viewed_at DESC);")
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_topics_active_users ON chat_topics(active, user1_id, user2_id);")
-        await cur.execute("CREATE INDEX IF NOT EXISTS idx_users_feed_activity ON users(active_chat_user_id, last_chat_activity_at DESC, last_active_at DESC);")
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_users_feed_activity ON users(active_chat_user_id, last_active_at DESC, last_chat_activity_at DESC);")
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at DESC);")
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_viewed_at_video ON views(viewer_user_id, viewed_at DESC, video_id);")
         await conn.commit()
 
 
@@ -206,6 +208,22 @@ class DB:
                     """,
                     (user_id, username),
                 )
+            await conn.commit()
+
+    async def ensure_user_activity(self, user_id: int, username: Optional[str] = None) -> None:
+        """Ensure the user exists and record activity in one DB round-trip."""
+        async with self.pool.connection() as conn:
+            cur = conn.cursor()
+            await cur.execute(
+                """
+                INSERT INTO users(user_id, username, last_active_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    username=EXCLUDED.username,
+                    last_active_at=CURRENT_TIMESTAMP;
+                """,
+                (user_id, username),
+            )
             await conn.commit()
 
     async def touch_user_activity(self, user_id: int) -> None:
@@ -572,46 +590,25 @@ class DB:
             # First show videos the user has never seen.
             await cur.execute(
                 """
-                WITH candidates AS (
-                    SELECT v.id, v.owner_user_id, v.file_id,
-                           u.age, u.gender, u.looking_for, u.about
-                    FROM videos v
-                    JOIN users u ON u.user_id = v.owner_user_id
-                    WHERE v.owner_user_id != %s
-                      AND u.video_hidden = FALSE
-                      AND NOT EXISTS (
-                        SELECT 1
-                        FROM views vw
-                        WHERE vw.viewer_user_id = %s
-                          AND vw.video_id = v.id
-                      )
-                )
-                SELECT id, owner_user_id, file_id, age, gender, looking_for, about
-                FROM candidates
+                SELECT v.id, v.owner_user_id, v.file_id,
+                       u.age, u.gender, u.looking_for, u.about
+                FROM videos v
+                JOIN users u ON u.user_id = v.owner_user_id
+                LEFT JOIN views vw
+                  ON vw.viewer_user_id = %s
+                 AND vw.video_id = v.id
+                WHERE v.owner_user_id != %s
+                  AND u.video_hidden = FALSE
+                  AND vw.video_id IS NULL
                 ORDER BY
-                    CASE WHEN (
-                        SELECT u2.active_chat_user_id
-                        FROM users u2
-                        WHERE u2.user_id = candidates.owner_user_id
-                    ) IS NOT NULL THEN 2
-                    WHEN (
-                        SELECT u2.last_active_at
-                        FROM users u2
-                        WHERE u2.user_id = candidates.owner_user_id
-                    ) >= NOW() - INTERVAL '15 minutes' THEN 0
-                    ELSE 1 END,
-                    (
-                        SELECT u2.last_active_at
-                        FROM users u2
-                        WHERE u2.user_id = candidates.owner_user_id
-                    ) DESC NULLS LAST,
-                    (
-                        SELECT v2.created_at
-                        FROM videos v2
-                        WHERE v2.id = candidates.id
-                    ) DESC
-                LIMIT 1;
-                """,
+                    CASE
+                        WHEN u.active_chat_user_id IS NOT NULL THEN 2
+                        WHEN u.last_active_at >= NOW() - INTERVAL '15 minutes' THEN 0
+                        ELSE 1
+                    END,
+                    u.last_active_at DESC NULLS LAST,
+                    v.created_at DESC
+                LIMIT 1;                """,
                 (viewer_user_id, viewer_user_id),
             )
             row = await cur.fetchone()
@@ -636,17 +633,13 @@ class DB:
                 JOIN users u ON u.user_id = v.owner_user_id
                 WHERE v.owner_user_id != %s
                   AND u.video_hidden = FALSE
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM (
-                      SELECT v2.owner_user_id
-                      FROM views vw2
-                      JOIN videos v2 ON v2.id = vw2.video_id
-                      WHERE vw2.viewer_user_id = %s
-                      ORDER BY vw2.viewed_at DESC
-                      LIMIT 5
-                    ) recent
-                    WHERE recent.owner_user_id = v.owner_user_id
+                  AND v.owner_user_id NOT IN (
+                    SELECT v2.owner_user_id
+                    FROM views vw2
+                    JOIN videos v2 ON v2.id = vw2.video_id
+                    WHERE vw2.viewer_user_id = %s
+                    ORDER BY vw2.viewed_at DESC
+                    LIMIT 5
                   )
                 ORDER BY
                     CASE WHEN u.active_chat_user_id IS NOT NULL THEN 2
@@ -667,10 +660,11 @@ class DB:
                     """
                     SELECT v.id, v.owner_user_id, v.file_id,
                            u.age, u.gender, u.looking_for, u.about
-                    FROM videos v
+                    FROM views vw
+                    JOIN videos v ON v.id = vw.video_id
                     JOIN users u ON u.user_id = v.owner_user_id
-                    JOIN views vw ON vw.video_id = v.id AND vw.viewer_user_id = %s
-                    WHERE v.owner_user_id != %s
+                    WHERE vw.viewer_user_id = %s
+                      AND v.owner_user_id != %s
                       AND u.video_hidden = FALSE
                     ORDER BY
                         CASE WHEN u.active_chat_user_id IS NOT NULL THEN 2
