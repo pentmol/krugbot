@@ -649,7 +649,7 @@ class DB:
                     v.created_at DESC
                 LIMIT 1;
                 """,
-                (viewer_user_id, viewer_user_id, viewer_user_id),
+                (viewer_user_id, viewer_user_id),
             )
             row = await cur.fetchone()
 
