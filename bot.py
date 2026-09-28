@@ -450,11 +450,12 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
         )
         return
 
+    # Спонсор-бот проверяется только один раз.
+    # После успешного запуска Streakgram доступ к ленте остаётся открытым.
     if state["sponsor_views_since_gate"] >= 3:
         if not await db.is_sponsor_gate_completed(viewer_user_id):
             await send_sponsor_gate(bot, chat_id)
             return
-        await db.reset_sponsor_gate(viewer_user_id)
 
     # File IDs are bot-specific; if DB has stale IDs (e.g. token changed),
     # Telegram returns "wrong file identifier". In that case we drop the record
