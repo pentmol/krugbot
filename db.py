@@ -70,6 +70,14 @@ class DB:
             """
         )
 
+        # Activity fields are added separately so existing Supabase databases migrate safely.
+        await cur.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;"
+        )
+        await cur.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_chat_activity_at TIMESTAMPTZ;"
+        )
+
         await cur.execute(
             """
             CREATE TABLE IF NOT EXISTS videos (
@@ -159,6 +167,8 @@ class DB:
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_video ON views(viewer_user_id, video_id);")
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_views_viewer_viewed_at ON views(viewer_user_id, viewed_at DESC);")
         await cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_topics_active_users ON chat_topics(active, user1_id, user2_id);")
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_users_feed_activity ON users(active_chat_user_id, last_chat_activity_at DESC, last_active_at DESC);")
+        await cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at DESC);")
         await conn.commit()
 
 
@@ -239,8 +249,14 @@ class DB:
             await self._ensure_user_conn(conn, user_id)
             await self._ensure_user_conn(conn, partner_user_id)
             cur = conn.cursor()
-            await cur.execute("UPDATE users SET active_chat_user_id=%s WHERE user_id=%s;", (partner_user_id, user_id))
-            await cur.execute("UPDATE users SET active_chat_user_id=%s WHERE user_id=%s;", (user_id, partner_user_id))
+            await cur.execute(
+                "UPDATE users SET active_chat_user_id=%s, last_chat_activity_at=CURRENT_TIMESTAMP WHERE user_id=%s;",
+                (partner_user_id, user_id),
+            )
+            await cur.execute(
+                "UPDATE users SET active_chat_user_id=%s, last_chat_activity_at=CURRENT_TIMESTAMP WHERE user_id=%s;",
+                (user_id, partner_user_id),
+            )
             await conn.commit()
 
     async def set_forum_chat_id(self, chat_id: int) -> None:
@@ -322,8 +338,13 @@ class DB:
     async def end_chat(self, user_id: int) -> Optional[int]:
         async with self.pool.connection() as conn:
             await self._ensure_user_conn(conn, user_id)
-            partner_user_id = await self.get_active_chat_user(user_id)
             cur = conn.cursor()
+            await cur.execute(
+                "SELECT active_chat_user_id FROM users WHERE user_id=%s;",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            partner_user_id = int(row["active_chat_user_id"]) if row and row["active_chat_user_id"] is not None else None
             await cur.execute("UPDATE users SET active_chat_user_id=NULL WHERE user_id=%s;", (user_id,))
             if partner_user_id is not None:
                 await cur.execute(
@@ -558,13 +579,22 @@ class DB:
                 )
                 SELECT id, owner_user_id, file_id, age, gender, looking_for, about
                 FROM candidates
-                OFFSET (
-                    SELECT CASE
-                        WHEN COUNT(*) = 0 THEN 0
-                        ELSE floor(random() * COUNT(*))
-                    END
-                    FROM candidates
-                )
+                ORDER BY
+                    CASE WHEN owner_user_id IN (
+                        SELECT active_chat_user_id
+                        FROM users
+                        WHERE active_chat_user_id IS NOT NULL
+                    ) THEN 0 ELSE 1 END,
+                    (
+                        SELECT u2.last_chat_activity_at
+                        FROM users u2
+                        WHERE u2.user_id = candidates.owner_user_id
+                    ) DESC NULLS LAST,
+                    (
+                        SELECT v2.created_at
+                        FROM videos v2
+                        WHERE v2.id = candidates.id
+                    ) DESC
                 LIMIT 1;
                 """,
                 (viewer_user_id, viewer_user_id),
@@ -603,12 +633,10 @@ class DB:
                     ) recent
                     WHERE recent.owner_user_id = v.owner_user_id
                   )
-                ORDER BY (
-                    SELECT vw3.viewed_at
-                    FROM views vw3
-                    WHERE vw3.viewer_user_id = %s
-                      AND vw3.video_id = v.id
-                ) ASC
+                ORDER BY
+                    CASE WHEN u.active_chat_user_id IS NOT NULL THEN 0 ELSE 1 END,
+                    u.last_chat_activity_at DESC NULLS LAST,
+                    v.created_at DESC
                 LIMIT 1;
                 """,
                 (viewer_user_id, viewer_user_id, viewer_user_id),
@@ -627,7 +655,10 @@ class DB:
                     JOIN views vw ON vw.video_id = v.id AND vw.viewer_user_id = %s
                     WHERE v.owner_user_id != %s
                       AND u.video_hidden = FALSE
-                    ORDER BY vw.viewed_at ASC
+                    ORDER BY
+                        CASE WHEN u.active_chat_user_id IS NOT NULL THEN 0 ELSE 1 END,
+                        u.last_chat_activity_at DESC NULLS LAST,
+                        vw.viewed_at ASC
                     LIMIT 1;
                     """,
                     (viewer_user_id, viewer_user_id),
@@ -645,6 +676,15 @@ class DB:
                 looking_for=row["looking_for"],
                 about=row["about"],
             )
+
+    async def mark_chat_activity(self, user_id: int) -> None:
+        async with self.pool.connection() as conn:
+            cur = conn.cursor()
+            await cur.execute(
+                "UPDATE users SET last_active_at=CURRENT_TIMESTAMP, last_chat_activity_at=CURRENT_TIMESTAMP WHERE user_id=%s;",
+                (user_id,),
+            )
+            await conn.commit()
 
     async def mark_viewed(self, viewer_user_id: int, video_id: int) -> None:
         async with self.pool.connection() as conn:
