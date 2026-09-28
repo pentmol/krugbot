@@ -394,15 +394,31 @@ class DB:
             return partner_user_id
 
     async def get_search_state(self, user_id: int) -> dict:
+        """Return all hot-path search state and mark this search interaction as active.
+
+        Keeping this in one query avoids separate activity/banned/sponsor lookups
+        every time the user presses "Следующее".
+        """
         async with self.pool.connection() as conn:
             cur = conn.cursor()
             await cur.execute(
                 """
-                SELECT banned, active_chat_user_id, profile_complete, has_video, sponsor_views_since_gate
-                FROM users
-                WHERE user_id=%s;
+                WITH touched AS (
+                    UPDATE users
+                    SET last_active_at=CURRENT_TIMESTAMP
+                    WHERE user_id=%s
+                    RETURNING banned, active_chat_user_id, profile_complete,
+                              has_video, sponsor_views_since_gate
+                )
+                SELECT touched.*,
+                       EXISTS (
+                           SELECT 1
+                           FROM krugbot_sponsor_completions sc
+                           WHERE sc.user_id=%s
+                       ) AS sponsor_gate_completed
+                FROM touched;
                 """,
-                (user_id,),
+                (user_id, user_id),
             )
             row = await cur.fetchone()
             if not row:
@@ -412,6 +428,7 @@ class DB:
                     "profile_complete": False,
                     "has_video": False,
                     "sponsor_views_since_gate": 0,
+                    "sponsor_gate_completed": False,
                 }
             return {
                 "banned": bool(row["banned"]),
@@ -419,6 +436,7 @@ class DB:
                 "profile_complete": bool(row["profile_complete"]),
                 "has_video": bool(row["has_video"]),
                 "sponsor_views_since_gate": int(row["sponsor_views_since_gate"] or 0),
+                "sponsor_gate_completed": bool(row["sponsor_gate_completed"]),
             }
 
     async def user_has_video(self, user_id: int) -> bool:
