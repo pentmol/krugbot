@@ -708,11 +708,16 @@ class DB:
                 VALUES (%s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(viewer_user_id, video_id) DO UPDATE SET
                   viewed_at=CURRENT_TIMESTAMP;
+                """,
+                (viewer_user_id, video_id),
+            )
+            await cur.execute(
+                """
                 UPDATE users
                 SET sponsor_views_since_gate = sponsor_views_since_gate + 1
                 WHERE user_id=%s;
                 """,
-                (viewer_user_id, video_id, viewer_user_id),
+                (viewer_user_id,),
             )
             await conn.commit()
 
