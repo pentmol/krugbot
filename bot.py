@@ -442,7 +442,6 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
             )
             return
 
-        await db.mark_viewed(viewer_user_id, video.id)
         try:
             video_message = await bot.send_video_note(
                 chat_id,
@@ -460,6 +459,8 @@ async def send_next_video(bot: Bot, chat_id: int, viewer_user_id: int, db: DB) -
                 format_profile_card(profile),
                 reply_markup=kb_video(video.id, video.owner_user_id, viewer_user_id, video_message_id=video_message.message_id),
             )
+            # Record the view after the Telegram messages are already delivered.
+            await db.mark_viewed(viewer_user_id, video.id)
             return
         except TelegramBadRequest as e:
             msg = str(e)
