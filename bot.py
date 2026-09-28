@@ -943,6 +943,7 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
     # Отправляем сообщение собеседнику и администратору независимо друг от друга.
     # Раньше оба действия были в одном try, поэтому ошибка при отправке одному
     # получателю могла помешать отправке второму.
+    delivered = True
     try:
         await bot.copy_message(
             chat_id=partner_user_id,
@@ -950,7 +951,12 @@ async def relay_chat_messages(message: Message, bot: Bot, db: DB) -> None:
             message_id=message.message_id,
         )
     except TelegramBadRequest:
+        delivered = False
         await message.answer("Не удалось доставить сообщение собеседнику.")
+
+    if delivered:
+        await db.mark_chat_activity(message.from_user.id)
+        await db.mark_chat_activity(partner_user_id)
 
     # Копируем каждое сообщение в отдельную тему админской форум-группы:
     # текст, фото, видео, кружки, документы, стикеры и другие поддерживаемые
