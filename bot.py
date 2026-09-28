@@ -4,7 +4,7 @@ import os
 import time
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -246,6 +246,28 @@ async def bot_chat_member_updated(event: ChatMemberUpdated, bot: Bot, db: DB) ->
                 pass
 
         log.info("User %s blocked the bot; removed their video from the feed.", user_id)
+
+
+@router.message(Command("krugbot_sponsor"))
+async def krugbot_sponsor(message: Message, db: DB) -> None:
+    sender = message.from_user
+    if sender is None or not sender.is_bot:
+        return
+
+    expected_username = os.getenv("STREAK_BOT_USERNAME", "streakgrambot").lstrip("@").lower()
+    actual_username = (sender.username or "").lstrip("@").lower()
+    if actual_username != expected_username:
+        log.warning("Rejected sponsor confirmation from unexpected bot: username=%s id=%s", sender.username, sender.id)
+        return
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        log.warning("Invalid sponsor confirmation payload from @%s", sender.username)
+        return
+
+    user_id = int(parts[1])
+    await db.record_sponsor_completion(user_id)
+    log.info("✅ Sponsor launch confirmed via Telegram bot-to-bot: user_id=%s", user_id)
 
 
 @router.message(CommandStart())
